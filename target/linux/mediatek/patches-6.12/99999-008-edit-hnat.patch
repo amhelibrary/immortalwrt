@@ -1,0 +1,13 @@
+--- a/drivers/net/ethernet/mediatek/mtk_hnat/hnat_nf_hook.c
++++ b/drivers/net/ethernet/mediatek/mtk_hnat/hnat_nf_hook.c
+@@ -628,8 +628,8 @@ static unsigned int do_hnat_ext_to_ge2(s
+ 		skb->vlan_proto = 0;
+ 		skb->vlan_tci = 0;
+ 
+-		if (skb_vlan_tag_present(skb)){
+-		__vlan_hwaccel_clear_tag(skb);
++		if (skb_vlan_tag_present(skb))
++			__vlan_hwaccel_clear_tag(skb);
+ 
+ 		if (ntohs(eth->h_proto) == ETH_P_8021Q) {
+ 			skb = skb_vlan_untag(skb);

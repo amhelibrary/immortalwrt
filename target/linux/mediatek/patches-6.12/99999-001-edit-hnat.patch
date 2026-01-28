@@ -1,0 +1,24 @@
+--- a/drivers/net/ethernet/mediatek/mtk_hnat/hnat.c
++++ b/drivers/net/ethernet/mediatek/mtk_hnat/hnat.c
+@@ -1610,7 +1610,11 @@ static int hnat_probe(struct platform_de
+ #else
+ 	hnat_priv->ppe_base[0] = hnat_priv->fe_base + 0xe00;
+ #endif
+-
++	hnat_priv->nf_stat_en = true; /* enable nf_stat_en by default */
++	hnat_priv->ipv6_en = true; /* enable ipv6 by default */
++	hnat_priv->guest_en = true; /* enable guest wifi by default */
++	hnat_priv->dscp_en = false;
++	hnat_priv->macvlan_support = false;
+ 	if (hnat_priv->data->version == MTK_HNAT_V3) {
+ 		/* PPE flow check interrupt registeration for MT7987 */
+ 		hnat_priv->fe_irq2 = platform_get_irq_optional(pdev, 0);
+@@ -1626,7 +1630,7 @@ static int hnat_probe(struct platform_de
+ 	err = hnat_init_debugfs(hnat_priv);
+ 	if (err)
+ 		goto err_out2;
+-
++	index = 0;
+ 	prop = of_find_property(np, "ext-devices", NULL);
+ 	for (name = of_prop_next_string(prop, NULL); name;
+ 	     name = of_prop_next_string(prop, name), index++) {

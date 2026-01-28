@@ -1,0 +1,267 @@
+--- a/drivers/net/ethernet/mediatek/mtk_hnat/hnat_debugfs.c
++++ b/drivers/net/ethernet/mediatek/mtk_hnat/hnat_debugfs.c
+@@ -872,7 +872,7 @@ static int cr_set_usage(int level)
+ 	pr_info("====================Advanced Settings====================\n");
+ 	pr_info("Usage: echo [type] [option] > /sys/kernel/debug/hnat/hnat_setting\n\n");
+ 	pr_info("Commands:   [type] [option]\n");
+-	pr_info("              0     0~7        Set debug_level(0~7), current debug_level=%d\n",
++	pr_info("              0     0~13        Set debug_level(0~7), current debug_level=%d\n",
+ 		debug_level);
+ 	pr_info("              1     0~65535    Set binding threshold\n");
+ 	pr_info("              2     0~65535    Set TCP bind lifetime\n");
+@@ -881,7 +881,12 @@ static int cr_set_usage(int level)
+ 	pr_info("              5     0~255      Set TCP keep alive interval\n");
+ 	pr_info("              6     0~255      Set UDP keep alive interval\n");
+ 	pr_info("              7     0~1        Set hnat counter update to nf_conntrack\n");
+-	pr_info("              8     0~6        Set PPE hash simple mode\n");
++//	pr_info("              8     0~6        Set PPE hash debug mode\n"); 
++	pr_info("              8     0~1        Set hnat disable/enable ipv6\n");
++	pr_info("              9     0~1        Set hnat disable/enable guest (rax1/ra1)\n");
++	pr_info("             10     0~1        Set hnat disable/enable dscp setting\n");
++	pr_info("             11     1~30       Set hnat band rate\n");
++	pr_info("             12     0~1        Set hnat macvlan support mode\n");
+ 
+ 	return 0;
+ }
+@@ -993,53 +998,104 @@ static int set_nf_update_toggle(int togg
+ 	return 0;
+ }
+ 
++static int set_ipv6_toggle(int toggle)
++{
++	struct mtk_hnat *h = hnat_priv;
++
++	if (toggle == 1)
++		pr_info("Enable hnat ipv6\n");
++	else if (toggle == 0)
++		pr_info("Disable hnat ipv6\n");
++	else {
++		pr_info("input error, current ipv6_en=%d\n", h->ipv6_en);
++		return 0;
++	}
++	h->ipv6_en = toggle;
++
++	return 0;}
+ 
+-static int set_hash_simple_mode(int mode)
++static int set_dscp_toggle(int toggle)
+ {
+-	static const char * const hash_simple_mode[] = {
+-		"Normal", "Source port[15:0]",
+-		"IPv4 source IP[15:0]", "IPv6 source IP[15:0]", "Destination port[15:0]",
+-		"IPv4 destination IP[15:0]", "IPv6 destination IP[15:0]" };
+-	unsigned int foe_table_sz, foe_acct_tb_sz, ppe_id, i;
+-
+-	if (mode < 0 || mode > 6) {
+-		pr_info("Invalid hash simple mode %d\n", mode);
+-		pr_info("[simple mode]\n");
+-		for (i = 0; i <= 6; i++)
+-			pr_info("		%d	%s\n", i, hash_simple_mode[i]);
+-		return -EINVAL;
++	struct mtk_hnat *h = hnat_priv;
++
++	if (toggle == 1)
++		pr_info("Enable hqos dscp setting\n");
++	else if (toggle == 0)
++		pr_info("Disable hqos dscp setting\n");
++	else {
++		pr_info("input error, current hqos dscp setting=%d\n", h->dscp_en);
++		return 0;
+ 	}
++	h->dscp_en = toggle;
+ 
+-	foe_table_sz = hnat_priv->foe_etry_num * sizeof(struct foe_entry);
+-	foe_acct_tb_sz = hnat_priv->foe_etry_num * sizeof(struct hnat_accounting);
++	return 0;
++}
+ 
+-	/* send all traffic back to the DMA engine */
+-	set_gmac_ppe_fwd(NR_GMAC1_PORT, 0);
+-	set_gmac_ppe_fwd(NR_GMAC2_PORT, 0);
+-	set_gmac_ppe_fwd(NR_GMAC3_PORT, 0);
++static int bind_rate_setting(int bind_rate)
++{
++	int i;
+ 
+-	for (ppe_id = 0; ppe_id < CFG_PPE_NUM; ppe_id++) {
+-		cr_set_field(hnat_priv->ppe_base[ppe_id] + PPE_TB_CFG,
+-			     HASH_DBG, mode);
++	if ((bind_rate > 30) || (bind_rate <1)) {
++		bind_rate = 30;
++		pr_info("bind_rate max interval = 30\n");
++	} else {
++		pr_info("bind_rate = %d\n", bind_rate);
++	}
+ 
+-		memset(hnat_priv->foe_table_cpu[ppe_id], 0, foe_table_sz);
++	/* Keep alive timer for bind FOE UDP entry */
++	for (i = 0; i < CFG_PPE_NUM; i++)
++		cr_set_field(hnat_priv->ppe_base[i] + PPE_BNDR, BIND_RATE, bind_rate);
+ 
+-		if (hnat_priv->data->version == MTK_HNAT_V1_1)
+-			exclude_boundary_entry(hnat_priv->foe_table_cpu[ppe_id]);
++	return 0;
++}
+ 
+-		if (hnat_priv->data->per_flow_accounting)
+-			memset(hnat_priv->acct[ppe_id], 0, foe_acct_tb_sz);
++static int set_macvlan_support(int toggle)
++{
++	struct mtk_hnat *h = hnat_priv;
++
++	if (toggle == 1)
++		pr_info("Enable macvlan support\n");
++	else if (toggle == 0)
++		pr_info("Disable macvlan support\n");
++	else {
++		pr_info("input error, current macvlan support setting=%d\n", h->macvlan_support);
++		return 0;
+ 	}
++	h->macvlan_support = toggle;
+ 
+-	/* clear HWNAT cache */
+-	hnat_cache_ebl(1);
++	return 0;
++}
+ 
+-	set_gmac_ppe_fwd(NR_GMAC1_PORT, 1);
+-	set_gmac_ppe_fwd(NR_GMAC2_PORT, 1);
+-	set_gmac_ppe_fwd(NR_GMAC3_PORT, 1);
++static void mtk_ppe_dev_hook(const char *name, int toggle)
++{
++	struct net_device *dev;
++	dev = dev_get_by_name(&init_net, name);
++	if (dev) {
++		if (toggle) {
++			mtk_ppe_dev_register_hook(dev);
++		} else {
++			mtk_ppe_dev_unregister_hook(dev);
++		}
++	}
++	return;
++}
+ 
+-	pr_info("Hash simple mode enabled, set to %s mode\n", hash_simple_mode[mode]);
++static int set_guest_toggle(int toggle)
++{
++	struct mtk_hnat *h = hnat_priv;
+ 
++	if (toggle == 1)
++		pr_info("Enable hnat guest interface\n");
++	else if (toggle == 0)
++		pr_info("Disable hnat guest interface\n");
++	else {
++		pr_info("input error, current guest_en=%d\n", h->guest_en);
++		return 0;
++	}
++	h->guest_en = toggle;
++	mtk_ppe_dev_hook("ra1", toggle);
++	mtk_ppe_dev_hook("rax1", toggle);
++	mtk_ppe_dev_hook("rai1", toggle);
+ 	return 0;
+ }
+ 
+@@ -1064,7 +1120,9 @@ static const debugfs_write_func cr_set_f
+ 	[2] = tcp_bind_lifetime, [3] = fin_bind_lifetime,
+ 	[4] = udp_bind_lifetime, [5] = tcp_keep_alive,
+ 	[6] = udp_keep_alive,    [7] = set_nf_update_toggle,
+-	[8] = set_hash_simple_mode,
++	/*	[8] = set_hash_dbg_mode, */[8] = set_ipv6_toggle,
++	[9] = set_guest_toggle, [10] = set_dscp_toggle,  
++	[11] = bind_rate_setting,[12] = set_macvlan_support,
+ };
+ 
+ static int read_mib(struct mtk_hnat *h, u32 ppe_id,
+@@ -2028,6 +2086,30 @@ static void dbg_dump_entry(struct seq_fi
+ 	}
+ }
+ 
++static int hnat_stats_read(struct seq_file *m, void *private)
++{
++	struct mtk_hnat *h = hnat_priv;
++	struct foe_entry *entry, *end;
++	int cnt, i;
++
++	seq_printf(m, "PPE_NUM=%d\n", CFG_PPE_NUM);
++
++	for (i = 0; i < CFG_PPE_NUM; i++) {
++		cnt = 0;
++		entry = h->foe_table_cpu[i];
++		end = h->foe_table_cpu[i] + hnat_priv->foe_etry_num;
++		while (entry < end) {
++			if (entry->bfib1.state == dbg_entry_state)
++				cnt++;
++			entry++;
++		}
++		seq_printf(m, "ALL_PPE%d=%d\n", i, hnat_priv->foe_etry_num);
++		seq_printf(m, "BIND_PPE%d=%d\n", i, cnt);
++	}
++
++	return 0;
++}
++
+ static int __hnat_entry_read(struct seq_file *m, void *private, u32 ppe_id)
+ {
+ 	struct mtk_hnat *h = hnat_priv;
+@@ -2160,6 +2242,18 @@ static const struct file_operations hnat
+ 	.release = single_release,
+ };
+ 
++static int hnat_stats_open(struct inode *inode, struct file *file)
++{
++	return single_open(file, hnat_stats_read, file->private_data);
++}
++
++static const struct file_operations hnat_stats_fops = {
++	.open = hnat_stats_open,
++	.read = seq_read,
++	.llseek = seq_lseek,
++	.release = single_release,
++};
++
+ static int __hnat_setting_read(struct seq_file *m, void *private, u32 ppe_id)
+ {
+ 	struct mtk_hnat *h = hnat_priv;
+@@ -2235,6 +2329,11 @@ static ssize_t hnat_setting_write(struct
+ 	case 6:
+ 	case 7:
+ 	case 8:
++	case 9:
++	case 10:
++	case 11:
++	case 12:
++//	case 13:
+ 		p_token = strsep(&p_buf, p_delimiter);
+ 		if (!p_token)
+ 			arg1 = 0;
+@@ -2400,9 +2499,9 @@ static int hnat_ext_show(struct seq_file
+ 	for (i = 0; i < MAX_EXT_DEVS && hnat_priv->ext_if[i]; i++) {
+ 		ext_entry = hnat_priv->ext_if[i];
+ 		if (ext_entry->dev)
+-			seq_printf(m, "ext devices [%d] = %s  (dev=%p, ifindex=%d)\n",
+-				   i, ext_entry->name, ext_entry->dev,
+-				   ext_entry->dev->ifindex);
++			seq_printf(m, "ext devices [%d] = %s,  (dev=%p, ifindex=%d)\n",
++				   i, ext_entry->dev->name, ext_entry->dev,
++ 				   ext_entry->dev->ifindex);
+ 	}
+ 
+ 	return 0;
+@@ -2536,7 +2635,7 @@ static const struct file_operations hnat
+ 
+ static int hnat_hook_toggle_read(struct seq_file *m, void *private)
+ {
+-	pr_info("value=%d, hook is %s now!\n", hook_toggle, (hook_toggle) ? "enabled" : "disabled");
++	seq_printf(m, "%s\n", (hook_toggle) ? "enabled" : "disabled");
+ 
+ 	return 0;
+ }
+@@ -3534,6 +3633,8 @@ int hnat_init_debugfs(struct mtk_hnat *h
+ 			    &cpu_reason_fops);
+ 	debugfs_create_file("hnat_entry", 0444, root, h,
+ 			    &hnat_entry_fops);
++	debugfs_create_file("hnat_stats", 0444, root, h,
++			    &hnat_stats_fops);
+ 	debugfs_create_file("hnat_setting", 0444, root, h,
+ 			    &hnat_setting_fops);
+ 	debugfs_create_file("mcast_table", 0444, root, h,

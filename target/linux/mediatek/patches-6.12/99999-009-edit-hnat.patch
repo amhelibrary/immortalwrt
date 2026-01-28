@@ -1,0 +1,58 @@
+--- a/drivers/net/ethernet/mediatek/mtk_hnat/hnat.h
++++ b/drivers/net/ethernet/mediatek/mtk_hnat/hnat.h
+@@ -426,7 +426,6 @@ struct hnat_ipv4_hnapt {
+ 	u32 act_dp : 8; /* UDF */
+ 	u16 vlan1;
+ 	u16 sp_tag;
+-	u16 etype;
+ 	u32 dmac_hi;
+ 	union {
+ #if !defined(CONFIG_MEDIATEK_NETSYS_V2) && !defined(CONFIG_MEDIATEK_NETSYS_V3)
+@@ -491,7 +490,6 @@ struct hnat_ipv4_dslite {
+ 
+ 	u16 vlan1;
+ 	u16 sp_tag;
+-	u16 etype;
+ 	u32 dmac_hi;
+ 	union {
+ #if !defined(CONFIG_MEDIATEK_NETSYS_V2) && !defined(CONFIG_MEDIATEK_NETSYS_V3)
+@@ -556,7 +554,6 @@ struct hnat_ipv4_mape {
+ 
+ 	u16 vlan1;
+ 	u16 sp_tag;
+-	u16 etype;
+ 	u32 dmac_hi;
+ 	union {
+ #if !defined(CONFIG_MEDIATEK_NETSYS_V2) && !defined(CONFIG_MEDIATEK_NETSYS_V3)
+@@ -624,7 +621,6 @@ struct hnat_ipv6_3t_route {
+ 	};
+ 	u16 vlan1;
+ 	u16 sp_tag;
+-	u16 etype;
+ 	u32 dmac_hi;
+ 	union {
+ #if !defined(CONFIG_MEDIATEK_NETSYS_V2) && !defined(CONFIG_MEDIATEK_NETSYS_V3)
+@@ -685,7 +681,6 @@ struct hnat_ipv6_5t_route {
+ 
+ 	u16 vlan1;
+ 	u16 sp_tag;
+-	u16 etype;
+ 	u32 dmac_hi;
+ 	union {
+ #if !defined(CONFIG_MEDIATEK_NETSYS_V2) && !defined(CONFIG_MEDIATEK_NETSYS_V3)
+@@ -754,7 +749,6 @@ struct hnat_ipv6_6rd {
+ 
+ 	u16 vlan1;
+ 	u16 sp_tag;
+-	u16 etype;
+ 	u32 dmac_hi;
+ 	union {
+ #if !defined(CONFIG_MEDIATEK_NETSYS_V2) && !defined(CONFIG_MEDIATEK_NETSYS_V3)
+@@ -812,7 +806,6 @@ struct hnat_ipv6_hnapt {
+ 
+ 	u16 vlan1;
+ 	u16 sp_tag;
+-	u16 etype;
+ 	u32 dmac_hi;
+ 	u16 vlan2;
+ 	u16 dmac_lo;
