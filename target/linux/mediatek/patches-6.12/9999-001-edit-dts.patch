@@ -1,0 +1,34 @@
+--- a/arch/arm64/boot/dts/mediatek/mt7988a-bananapi-bpi-r4.dtsi
++++ b/arch/arm64/boot/dts/mediatek/mt7988a-bananapi-bpi-r4.dtsi
+@@ -11,9 +11,9 @@
+ 
+ / {
+ 	chosen {
+-		bootargs = "console=ttyS0,115200n1 loglevel=6 \
++		bootargs = "console=ttyS0,115200n1 loglevel=8 \
+ 			    earlycon=uart8250,mmio32,0x11000000 \
+-			    pci=pcie_bus_perf ubi.block=0,firmware root=/dev/fit0 \
++			    pci=pcie_bus_perf ubi.block=0,firmware root=/dev/fit0 \
+ 			    rootwait";
+ 	};
+ 
+@@ -525,6 +525,19 @@
+ 	};
+ };
+ 
++&hnat {
++	mtketh-wan = "eth2";
++	mtketh-lan = "lan";
++	mtketh-lan2 = "eth1";
++	mtketh-max-gmac = <3>;
++	mtketh-ppe-num = <3>;
++	status = "okay";
++};
++
++&crypto {
++	status = "okay";
++};
++
+ &pwm {
+ 	status = "okay";
+ };

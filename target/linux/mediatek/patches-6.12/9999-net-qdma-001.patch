@@ -1,0 +1,39 @@
+--- a/drivers/net/ethernet/mediatek/mtk_eth_soc.c
++++ b/drivers/net/ethernet/mediatek/mtk_eth_soc.c
+@@ -1064,7 +1064,8 @@ static void mtk_set_queue_speed(struct m
+ 		eth->qdma_shaper.speed[idx] = speed;
+ 
+ out:
+-	ofs = MTK_QTX_OFFSET * idx;
++	mtk_w32(eth, (idx / MTK_QTX_PER_PAGE), soc->reg_map->qdma.page);
++	ofs = MTK_QTX_OFFSET * (idx % MTK_QTX_PER_PAGE);
+ 	mtk_w32(eth, val, soc->reg_map->qdma.qtx_sch + ofs);
+ }
+ 
+@@ -3266,6 +3267,8 @@ static int mtk_tx_alloc(struct mtk_eth *
+ 		mtk_w32(eth, ring->last_free_ptr, soc->reg_map->qdma.drx_ptr);
+ 
+ 		for (i = 0, ofs = 0; i < MTK_QDMA_NUM_QUEUES; i++) {
++			mtk_w32(eth, (i / MTK_QTX_PER_PAGE), soc->reg_map->qdma.page);
++
+ 			val = (QDMA_RES_THRES << 8) | QDMA_RES_THRES;
+ 			mtk_w32(eth, val, soc->reg_map->qdma.qtx_cfg + ofs);
+ 
+@@ -3283,7 +3286,7 @@ static int mtk_tx_alloc(struct mtk_eth *
+ 			if (mtk_is_netsys_v1(eth))
+ 				val |= MTK_QTX_SCH_LEAKY_BUCKET_EN;
+ 			mtk_w32(eth, val, soc->reg_map->qdma.qtx_sch + ofs);
+-			ofs += MTK_QTX_OFFSET;
++			ofs = (ofs + MTK_QTX_OFFSET) % (MTK_QTX_OFFSET * MTK_QTX_PER_PAGE);
+ 		}
+ 		val = MTK_QDMA_TX_SCH_MAX_WFQ | (MTK_QDMA_TX_SCH_MAX_WFQ << 16);
+ 		mtk_w32(eth, val, soc->reg_map->qdma.tx_sch_rate);
+@@ -4931,7 +4934,7 @@ static void mtk_hw_dump_all(struct mtk_e
+ 	mtk_hw_dump_reg(eth, "ADMA", reg_map->pdma.rx_ptr, 0x300);
+ 	if (MTK_HAS_CAPS(eth->soc->caps, MTK_QDMA)) {
+ 		for (id = 0; id < MTK_QDMA_NUM_QUEUES / 16; id++) {
+-			mtk_w32(eth, id, reg_map->qdma.page);
++			mtk_w32(eth, (id / MTK_QTX_PER_PAGE), reg_map->qdma.page);
+ 			pr_info("\nQDMA PAGE:%x ", mtk_r32(eth, reg_map->qdma.page));
+ 			mtk_hw_dump_reg(eth, "QDMA", reg_map->qdma.qtx_cfg, 0x100);
+ 			mtk_w32(eth, 0, reg_map->qdma.page);
