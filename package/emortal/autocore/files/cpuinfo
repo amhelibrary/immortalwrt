@@ -7,6 +7,42 @@ CPUFREQ_PATH="/sys/devices/system/cpu/cpufreq"
 THERMAL_PATH="/sys/class/thermal"
 
 cpu_arch="$(awk -F ': ' '/model name/ {print $2}' "$CPUINFO_PATH" | head -n1)"
+
+# Fallback for ARM/ARM64: use CPU part to identify the core type
+if [ -z "$cpu_arch" ]; then
+	cpu_part="$(awk -F ': ' '/CPU part/ {print $2}' "$CPUINFO_PATH" | head -n1)"
+	case "$cpu_part" in
+		0xd03) cpu_arch="Cortex-A53" ;;
+		0xd04) cpu_arch="Cortex-A35" ;;
+		0xd05) cpu_arch="Cortex-A55" ;;
+		0xd06) cpu_arch="Cortex-A65" ;;
+		0xd07) cpu_arch="Cortex-A57" ;;
+		0xd08) cpu_arch="Cortex-A72" ;;
+		0xd09) cpu_arch="Cortex-A73" ;;
+		0xd0a) cpu_arch="Cortex-A75" ;;
+		0xd0b) cpu_arch="Cortex-A76" ;;
+		0xd0c) cpu_arch="Neoverse-N1" ;;
+		0xd0d) cpu_arch="Cortex-A77" ;;
+		0xd0e) cpu_arch="Cortex-A76AE" ;;
+		0xd40) cpu_arch="Neoverse-V1" ;;
+		0xd41) cpu_arch="Cortex-A78" ;;
+		0xd42) cpu_arch="Cortex-A78AE" ;;
+		0xd43) cpu_arch="Cortex-A65AE" ;;
+		0xd44) cpu_arch="Cortex-X1" ;;
+		0xd46) cpu_arch="Cortex-A510" ;;
+		0xd47) cpu_arch="Cortex-A710" ;;
+		0xd48) cpu_arch="Cortex-X2" ;;
+		0xd49) cpu_arch="Neoverse-N2" ;;
+		0xd4a) cpu_arch="Neoverse-E1" ;;
+		0xc07) cpu_arch="Cortex-A7" ;;
+		0xc09) cpu_arch="Cortex-A9" ;;
+		0xc0d) cpu_arch="Cortex-A12" ;;
+		0xc0e) cpu_arch="Cortex-A17" ;;
+		0xc0f) cpu_arch="Cortex-A15" ;;
+		*) cpu_arch="ARMv8 Processor" ;;
+	esac
+fi
+
 [ -n "${cpu_arch}" ] || cpu_arch="?"
 
 case "$DISTRIB_TARGET" in

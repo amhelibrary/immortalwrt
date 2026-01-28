@@ -10,11 +10,6 @@
 #include <dt-bindings/gpio/gpio.h>
 
 / {
-	compatible = "bananapi,bpi-r4-lite",
-		     "mediatek,mt7987a", "mediatek,mt7987";
-};
-
-/ {
 	fragment@0 {
 		target-path = "/soc/pinctrl@1001f000";
 		__overlay__ {

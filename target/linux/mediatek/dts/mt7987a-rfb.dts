@@ -14,10 +14,10 @@
 	compatible = "mediatek,mt7987a", "mediatek,mt7987";
 
 	chosen {
-		bootargs = "console=ttyS0,115200n1 \
+		bootargs = "console=ttyS0,115200n1 loglevel=6  \
 			    earlycon=uart8250,mmio32,0x11000000 \
 			    pci=pcie_bus_perf ubi.block=0,firmware \
-			    root=/dev/fit0 rootwait nosmp";
+			    root=/dev/fit0 rootwait";
 	};
 
 	gpio-keys {
@@ -40,9 +40,10 @@
 
 	/* use pwm0 as led: share with fan/pwm_rgb */
 	pwm_led {
+		compatible = "pwm-leds";
 		pinctrl-names = "default";
 		pinctrl-0 = <&pwm_pins>;
-		status = "okay";
+		status = "disabled";
 
 		led {
 			pwms = <&pwm 0 50000 0>;
@@ -54,6 +55,7 @@
 
 	/* use pwm0/1/2 as multicolor LED: share with fan/pwm_led */
 	pwm_rgb {
+		compatible = "pwm-leds-multicolor";
 		pinctrl-names = "default";
 		pinctrl-0 = <&pwm_rgb_pins>;
 		status = "disabled";
@@ -81,39 +83,7 @@
 	};
 };
 
-&i2c0 {
-	pinctrl-names = "default";
-	pinctrl-0 = <&i2c0_pins>;
-	status = "okay";
-};
-
 &fan {
 	pwms = <&pwm 0 50000 0>;
 	status = "disabled";
-};
-
-&pcie0 {
-	pinctrl-names = "default";
-	pinctrl-0 = <&pcie0_pins>;
-	status = "okay";
-};
-
-&pcie1 {
-	pinctrl-names = "default";
-	pinctrl-0 = <&pcie1_pins>;
-	status = "disabled";
-};
-
-&pwm {
-	status = "okay";
-};
-
-&ssusb {
-	status = "okay";
-};
-
-&uart0 {
-	pinctrl-names = "default";
-	pinctrl-0 = <&uart0_pins>;
-	status = "okay";
 };

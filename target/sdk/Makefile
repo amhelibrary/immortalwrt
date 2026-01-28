@@ -47,7 +47,7 @@ GIT_TAGNAME:=$(shell git show-ref --tags --dereference 2>/dev/null | sed -ne '/^
 BASE_FEED:=$(if $(GIT_URL),src-git --root=package base $(GIT_URL)$(if $(CONFIG_BUILDBOT),^$(GIT_COMMIT),$(if $(GIT_TAGNAME),;$(GIT_TAGNAME),$(if $(GIT_BRANCH),;$(GIT_BRANCH)))))
 BASE_FEED:=$(if $(BASE_FEED),$(BASE_FEED),$(shell cd $(TOPDIR); LC_ALL=C git svn info 2>/dev/null | sed -ne 's/^URL: /src-gitsvn --root=package base /p'))
 BASE_FEED:=$(if $(BASE_FEED),$(BASE_FEED),$(shell cd $(TOPDIR); LC_ALL=C svn info 2>/dev/null | sed -ne 's/^URL: /src-svn --root=package base /p'))
-BASE_FEED:=$(if $(BASE_FEED),$(BASE_FEED),src-git --root=package base https://github.com/immortalwrt/immortalwrt.git$(if $(CONFIG_BUILDBOT),^$(GIT_COMMIT),$(if $(GIT_TAGNAME),;$(GIT_TAGNAME),$(if $(GIT_BRANCH),;$(GIT_BRANCH)))))
+BASE_FEED:=$(if $(BASE_FEED),$(BASE_FEED),src-git --root=package base $(PROJECT_GIT)/openwrt/openwrt.git$(if $(CONFIG_BUILDBOT),^$(GIT_COMMIT),$(if $(GIT_TAGNAME),;$(GIT_TAGNAME),$(if $(GIT_BRANCH),;$(GIT_BRANCH)))))
 
 KDIR_BASE = $(patsubst $(TOPDIR)/%,%,$(LINUX_DIR))
 KDIR_ARCHES = $(LINUX_KARCH)
@@ -114,7 +114,12 @@ $(BIN_DIR)/$(SDK_NAME).tar.zst: clean
 		`cd $(TOPDIR); find $(KDIR_BASE)/firmware/ -newer $(KDIR_BASE)/firmware/Makefile \
 			-type f -name '*.bin' -or -name '*.cis' -or -name '*.csp' -or -name '*.dsp' -or -name '*.fw'` \
 		$(foreach exclude,$(EXCLUDE_DIRS),--exclude="$(exclude)") \
-		$(SDK_DIRS) $(KERNEL_FILES) | \
+		$(SDK_DIRS) | \
+		$(TAR) -xf - -C $(SDK_BUILD_DIR)
+
+	$(TAR) -hcf - -C $(TOPDIR) \
+		$(foreach exclude,$(EXCLUDE_DIRS),--exclude="$(exclude)") \
+		$(KERNEL_FILES) | \
 		$(TAR) -xf - -C $(SDK_BUILD_DIR)
 
 	$(TAR) -cf - -C $(TOPDIR) $(USERSPACE_FILES) | \
