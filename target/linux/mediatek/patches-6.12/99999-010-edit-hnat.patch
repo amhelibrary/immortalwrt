@@ -1,0 +1,11 @@
+--- a/drivers/net/ethernet/mediatek/mtk_hnat/hnat_nf_hook.c
++++ b/drivers/net/ethernet/mediatek/mtk_hnat/hnat_nf_hook.c
+@@ -3814,7 +3814,7 @@ static unsigned int mtk_hnat_nf_post_rou
+ {
+ 	struct ethhdr eth = {0};
+ 	struct foe_entry *entry;
+-	struct flow_offload_hw_path hw_path = { .virt_dev = (struct net_device *)out };
++	struct flow_offload_hw_path hw_path = { .virt_dev = (struct net_device *)out , .skb_hash = skb_hnat_entry(skb) };
+ 	const struct net_device *arp_dev = out;
+ 	bool is_virt_dev = false;
+ 
