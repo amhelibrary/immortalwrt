@@ -1,0 +1,30 @@
+--- a/configs/mt7988a_bananapi_bpi-r4-pro-8x-emmc_defconfig
++++ b/configs/mt7988a_bananapi_bpi-r4-pro-8x-emmc_defconfig
+@@ -29,7 +29,6 @@ CONFIG_SYS_PBSIZE=1049
+ CONFIG_LOGLEVEL=7
+ CONFIG_PRE_CONSOLE_BUFFER=y
+ CONFIG_LOG=y
+-CONFIG_BOARD_LATE_INIT=y
+ CONFIG_HUSH_PARSER=y
+ CONFIG_SYS_PROMPT="MT7988> "
+ CONFIG_CMD_CPU=y
+--- a/configs/mt7988a_bananapi_bpi-r4-pro-8x-sdmmc_defconfig
++++ b/configs/mt7988a_bananapi_bpi-r4-pro-8x-sdmmc_defconfig
+@@ -29,7 +29,6 @@ CONFIG_SYS_PBSIZE=1049
+ CONFIG_LOGLEVEL=7
+ CONFIG_PRE_CONSOLE_BUFFER=y
+ CONFIG_LOG=y
+-CONFIG_BOARD_LATE_INIT=y
+ CONFIG_HUSH_PARSER=y
+ CONFIG_SYS_PROMPT="MT7988> "
+ CONFIG_CMD_CPU=y
+--- a/configs/mt7988a_bananapi_bpi-r4-pro-8x-snand_defconfig
++++ b/configs/mt7988a_bananapi_bpi-r4-pro-8x-snand_defconfig
+@@ -26,7 +26,6 @@ CONFIG_SYS_PBSIZE=1049
+ CONFIG_LOGLEVEL=7
+ CONFIG_PRE_CONSOLE_BUFFER=y
+ CONFIG_LOG=y
+-CONFIG_BOARD_LATE_INIT=y
+ CONFIG_HUSH_PARSER=y
+ CONFIG_SYS_PROMPT="MT7988> "
+ CONFIG_CMD_CPU=y

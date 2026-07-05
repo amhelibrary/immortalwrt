@@ -1,0 +1,107 @@
+--- a/arch/arm64/boot/dts/mediatek/mt7988a-bananapi-bpi-r4-2g5.dts
++++ b/arch/arm64/boot/dts/mediatek/mt7988a-bananapi-bpi-r4-2g5.dts
+@@ -13,6 +13,8 @@
+ &gmac1 {
+ 	phy-mode = "internal";
+ 	phy-connection-type = "internal";
++	nvmem-cell-names = "mac-address";
++	nvmem-cells = <&gmac0_mac>;
+ 	phy = <&int_2p5g_phy>;
+ };
+ 
+@@ -25,6 +27,8 @@
+ 	phy-mode = "internal";
+ 	phy-connection-type = "internal";
+ 	phy = <&int_2p5g_phy>;
++	nvmem-cell-names = "mac-address";
++	nvmem-cells = <&gmac0_mac>;
+ 	openwrt,netdev-name = "lan4";
+ 	status = "okay";
+ };
+--- a/arch/arm64/boot/dts/mediatek/mt7988a-bananapi-bpi-r4.dtsi
++++ b/arch/arm64/boot/dts/mediatek/mt7988a-bananapi-bpi-r4.dtsi
+@@ -118,6 +118,8 @@
+ };
+ 
+ &gmac0 {
++	nvmem-cell-names = "mac-address";
++	nvmem-cells = <&gmac0_mac>;
+ 	status = "okay";
+ };
+ 
+@@ -125,6 +127,8 @@
+ 	sfp = <&sfp1>;
+ 	managed = "in-band-status";
+ 	phy-mode = "usxgmii";
++	nvmem-cell-names = "mac-address";
++	nvmem-cells = <&gmac0_mac>;
+ 	openwrt,netdev-name = "sfp-wan";
+ 	status = "okay";
+ };
+@@ -560,6 +564,66 @@
+ 	};
+ };
+ 
++&spi_nand {
++	partitions {
++		compatible = "fixed-partitions";
++		#address-cells = <1>;
++		#size-cells = <1>;
++
++		partition@0 {
++			label = "BL2";
++			reg = <0x00000 0x0100000>;
++			read-only;
++		};
++
++
++		partition@100000 {
++			label = "u-boot-env";
++			reg = <0x0100000 0x0080000>;
++		};
++
++		factory: partition@180000 {
++			label = "Factory";
++			reg = <0x180000 0x0400000>;
++
++			nvmem-layout {
++				compatible = "fixed-layout";
++				#address-cells = <1>;
++				#size-cells = <1>;
++
++				gmac2_mac: eeprom@fffee {
++					reg = <0xfffee 0x6>;
++				};
++
++				gmac1_mac: eeprom@ffffa {
++					reg = <0xffffa 0x6>;
++				};
++
++				gmac0_mac: eeprom@ffff4 {
++					reg = <0xffff4 0x6>;
++				};
++			};
++		};
++
++		partition@580000 {
++			label = "FIP";
++			reg = <0x580000 0x0200000>;
++		};
++
++		partition@780000 {
++			label = "ubi";
++			reg = <0x780000 0x7080000>;
++			compatible = "linux,ubi";
++
++			volumes {
++				ubi_rootfs: ubi-volume-fit {
++					volname = "firmware";
++				};
++			};
++		};
++	};
++};
++
+ &spi1 {
+ 	status = "okay";
+ };

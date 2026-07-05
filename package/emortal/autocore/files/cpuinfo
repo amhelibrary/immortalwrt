@@ -7,6 +7,15 @@ CPUFREQ_PATH="/sys/devices/system/cpu/cpufreq"
 THERMAL_PATH="/sys/class/thermal"
 
 cpu_arch="$(awk -F ': ' '/model name/ {print $2}' "$CPUINFO_PATH" | head -n1)"
+
+# Fallback for ARM/ARM64: use CPU part to identify the core type
+if [ -z "$cpu_arch" ]; then
+	cpu_part="$(awk -F ': ' '/CPU part/ {print $2}' "$CPUINFO_PATH" | head -n1)"
+	case "$cpu_part" in
+		*) cpu_arch="ARMv8 Processor" ;;
+	esac
+fi
+
 [ -n "${cpu_arch}" ] || cpu_arch="?"
 
 case "$DISTRIB_TARGET" in
