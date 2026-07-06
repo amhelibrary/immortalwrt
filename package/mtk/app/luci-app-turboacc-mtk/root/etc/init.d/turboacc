@@ -55,10 +55,10 @@ start_service() {
 			local fastpath_mh_eth_hnat_v6 fastpath_mh_eth_hnat_ap fastpath_mh_eth_hnat_bind_rate
 
 			config_get_bool "fastpath_mh_eth_hnat_v6" "config" "fastpath_mh_eth_hnat_v6" "1"
-			echo "8 $fastpath_mh_eth_hnat_v6" > "$hnat_path/hnat_setting"
+			echo "11 $fastpath_mh_eth_hnat_v6" > "$hnat_path/hnat_setting"
 
 			config_get "fastpath_mh_eth_hnat_bind_rate" "config" "fastpath_mh_eth_hnat_bind_rate" "30"
-			echo "11 $fastpath_mh_eth_hnat_bind_rate" > "$hnat_path/hnat_setting"
+			echo "14 $fastpath_mh_eth_hnat_bind_rate" > "$hnat_path/hnat_setting"
 
 			config_get "fastpath_mh_eth_hnat_ap" "config" "fastpath_mh_eth_hnat_ap" ""
 		fi
