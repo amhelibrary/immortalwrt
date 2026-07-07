@@ -225,9 +225,9 @@ return view.extend({
 		o.depends('fastpath_mh_eth_hnat', '1');
 		
 		o = s.option(form.Value, 'fastpath_mh_eth_hnat_bind_rate', _('HNAT bind rate threshold (pps)'),
-			_('The smaller the threshold, the easier it is for the connection to be accelerated.'));
+			_('0=immediate binding (no rate limit), 1-30 packets per second. Smaller threshold = faster acceleration.'));
 		o.optional = true;
-		o.datatype = 'range(1,30)';
+		o.datatype = 'range(0,30)';
 		o.placeholder = 30;
 		o.depends('fastpath_mh_eth_hnat', '1');
 

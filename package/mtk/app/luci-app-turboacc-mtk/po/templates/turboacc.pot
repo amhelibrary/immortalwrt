@@ -45,7 +45,7 @@ msgid "HNAT bind rate threshold (pps)"
 msgstr ""
 
 #: applications/luci-app-turboacc/htdocs/luci-static/resources/view/turboacc.js:184
-msgid "The smaller the threshold, the easier it is for the connection to be accelerated."
+msgid "0=immediate binding (no rate limit), 1-30 packets per second. Smaller threshold = faster acceleration."
 msgstr ""
 
 #: applications/luci-app-turboacc/htdocs/luci-static/resources/view/turboacc.js:152
