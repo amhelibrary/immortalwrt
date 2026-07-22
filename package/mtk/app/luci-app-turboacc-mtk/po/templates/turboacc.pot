@@ -33,11 +33,11 @@ msgid "Enable IPv6 Acceleration."
 msgstr ""
 
 #: applications/luci-app-turboacc/htdocs/luci-static/resources/view/turboacc.js:177
-msgid "Enable AP Mode"
+msgid "Enable ethernet HNAT for MACVLAN WAN device"
 msgstr ""
 
 #: applications/luci-app-turboacc/htdocs/luci-static/resources/view/turboacc.js:178
-msgid "Fill in ip to enable AP Mode(reboot needed)"
+msgid "Enable hardware offloading for macvlan (sing wan only)."
 msgstr ""
 
 #: applications/luci-app-turboacc/htdocs/luci-static/resources/view/turboacc.js:183

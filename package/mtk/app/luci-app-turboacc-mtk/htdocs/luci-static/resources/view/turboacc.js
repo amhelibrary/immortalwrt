@@ -219,9 +219,10 @@ return view.extend({
 		o.rmempty = false;
 		o.depends('fastpath_mh_eth_hnat', '1');
 		
-		o = s.option(form.Value, 'fastpath_mh_eth_hnat_ap', _('Enable AP Mode'),
-			_('Fill in ip to enable AP Mode(reboot needed)'));
-		o.optional = true;
+		o = s.option(form.Flag, 'fastpath_mh_eth_hnat_macvlan', _('Enable ethernet HNAT for MACVLAN WAN device'),
+			_('Enable hardware offloading for macvlan (sing wan only).'));
+		o.default = o.disabled;
+		o.rmempty = false;
 		o.depends('fastpath_mh_eth_hnat', '1');
 		
 		o = s.option(form.Value, 'fastpath_mh_eth_hnat_bind_rate', _('HNAT bind rate threshold (pps)'),
@@ -231,13 +232,7 @@ return view.extend({
 		o.placeholder = 30;
 		o.depends('fastpath_mh_eth_hnat', '1');
 
-		o = s.option(form.ListValue, 'fastpath_mh_eth_hnat_ppenum', _('Number of HNAT PPE'),
-			_('Apply this setting after reboot.'));
-		o.rmempty = false;
-		o.value(1);
-		o.value(2);
-		o.default = 2;
-		o.depends('fastpath_mh_eth_hnat', '1');
+		
 
 		o = s.option(form.ListValue, 'fullcone', _('Full cone NAT'),
 			_('Full cone NAT (NAT1) can improve gaming performance effectively.'));
@@ -252,7 +247,7 @@ return view.extend({
 			o.value(i);
 		o.default = 'cubic';
 		o.rmempty = false;
-        
+
 		return m.render();
 	}
 });

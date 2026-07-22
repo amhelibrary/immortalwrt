@@ -6,7 +6,6 @@
 include $(TOPDIR)/rules.mk
 
 PKG_NAME:=libkcapi
-PKG_RELEASE:=1.4.0
 PKG_VERSION:=1.4.0
 PKG_BUILD_DIR:=$(BUILD_DIR)/$(PKG_NAME)-$(PKG_VERSION)
 PKG_FIXUP:=autoreconf
