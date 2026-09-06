@@ -1,0 +1,70 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: AI Dev <dev@example.com>
+Date: Thu, 1 Jan 1970 00:00:00 +0000
+Subject: [PATCH] net: ethernet: mtk_ppe: route flowtable commands to HNAT
+
+Allow mtkhnat to install a flowtable front-end callback while keeping
+the mainline mtk_ppe path as fallback.
+
+Signed-off-by: AI Dev <dev@example.com>
+---
+ drivers/net/ethernet/mediatek/mtk_ppe.h          |  8 ++++++--
+ drivers/net/ethernet/mediatek/mtk_ppe_offload.c  | 14 +++++++++++++-
+ 2 files changed, 19 insertions(+), 3 deletions(-)
+
+--- a/drivers/net/ethernet/mediatek/mtk_ppe.h
++++ b/drivers/net/ethernet/mediatek/mtk_ppe.h
+@@ -6,8 +6,12 @@
+ #include <linux/rhashtable.h>
+ 
+ #include "mtk_eth_soc.h"
+ 
++struct mtk_eth;
++struct flow_cls_offload;
++
+ #define MTK_PPE_EXCEPTION_TAG0x99
+ #define MTK_PPE_ENTRIES_SHIFT4
+ #define MTK_PPE_ENTRIES(1024 << MTK_PPE_ENTRIES_SHIFT)
+@@ -114,6 +118,8 @@
+ 
+ extern int (*mtk_flow_offload_get_cdrt)(struct xfrm_state *xs);
++extern int (*mtk_flow_offload_hnat_cmd)(struct mtk_eth *eth,
++struct flow_cls_offload *cls);
+ 
+ enum {
+ MTK_FOE_NPU_DEL,
+--- a/drivers/net/ethernet/mediatek/mtk_ppe_offload.c
++++ b/drivers/net/ethernet/mediatek/mtk_ppe_offload.c
+@@ -64,6 +64,10 @@
+ int (*mtk_flow_offload_get_cdrt)(struct xfrm_state *xs) = NULL;
+ EXPORT_SYMBOL(mtk_flow_offload_get_cdrt);
+ 
++int (*mtk_flow_offload_hnat_cmd)(struct mtk_eth *eth,
++ struct flow_cls_offload *cls) = NULL;
++EXPORT_SYMBOL(mtk_flow_offload_hnat_cmd);
++
+ static int
+ mtk_flow_set_ipv4_addr(struct mtk_eth *eth, struct mtk_foe_entry *foe,
+        struct mtk_flow_data *data, bool egress)
+@@ -956,6 +960,11 @@
+ int err;
+ 
+ mutex_lock(&mtk_flow_offload_mutex);
++if (mtk_flow_offload_hnat_cmd) {
++err = mtk_flow_offload_hnat_cmd(eth, cls);
++goto out;
++}
++
+ switch (cls->command) {
+ case FLOW_CLS_REPLACE:
+ err = mtk_flow_offload_replace(eth, cls, ppe_index);
+@@ -970,6 +979,7 @@
+ err = -EOPNOTSUPP;
+ break;
+ }
++out:
+ mutex_unlock(&mtk_flow_offload_mutex);
+ 
+ return err;
+-- 
+2.45.2

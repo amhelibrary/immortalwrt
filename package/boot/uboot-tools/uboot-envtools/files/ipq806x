@@ -62,13 +62,9 @@ ubnt,unifi-ac-hd|\
 zyxel,nbg6817)
 	ubootenv_add_uci_config "/dev/mtdblock9" "0x0" "0x10000" "0x10000"
 	;;
-xiaomi,mi-router-hd)
-	ubootenv_add_uci_config "/dev/mtd9" "0x0" "0x10000" "0x10000"
-	ubootenv_add_uci_sys_config "/dev/mtd12" "0x0" "0x10000" "0x10000"
-	;;
 esac
 
 config_load ubootenv
-config_foreach ubootenv_add_app_config
+config_foreach ubootenv_add_app_config ubootenv
 
 exit 0

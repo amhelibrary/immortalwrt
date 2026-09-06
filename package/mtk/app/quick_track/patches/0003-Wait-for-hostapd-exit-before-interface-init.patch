@@ -1,0 +1,29 @@
+From 51aaff7862a12405c811dba8197a2dc20e1c0627 Mon Sep 17 00:00:00 2001
+From: Martin Tang <martin.tang@mediatek.com>
+Date: Tue, 11 Aug 2026 14:16:05 +0800
+Subject: [PATCH] Wait for hostapd exit before interface initialization
+
+Wait for hostapd to exit and remove its virtual interfaces before initializing QuickTrack interfaces. Skip interface initialization when hostapd is still running to avoid interface conflicts.
+
+Signed-off-by: Martin Tang <martin.tang@mediatek.com>
+---
+ vendor_specific_dut.c | 7 +++++++
+ 1 file changed, 7 insertions(+)
+
+diff --git a/vendor_specific_dut.c b/vendor_specific_dut.c
+index d865a8a..9819f54 100644
+--- a/vendor_specific_dut.c
++++ b/vendor_specific_dut.c
+@@ -137,3 +137,10 @@ void vendor_init() {
++    /* Wait for hostapd to remove its virtual interfaces. */
++    sleep(1);
++    if (system("pidof hostapd >/dev/null 2>&1") == 0) {
++        indigo_logger(LOG_LEVEL_ERROR,
++                "hostapd did not exit; skip interface initialization");
++        return;
++    }
+     interfaces_init();
+ #if HOSTAPD_SUPPORT_MBSSID
+ #ifdef HOSTAPD_SUPPORT_MBSSID_WAR
+--
+2.45.2
