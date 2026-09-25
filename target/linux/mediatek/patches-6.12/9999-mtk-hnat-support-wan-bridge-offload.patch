@@ -1,0 +1,312 @@
+From: MediaTek Inc.
+Subject: [PATCH] net: ethernet: mediatek: hnat: add bridge and multi-WAN offload support
+
+Add support for hardware flow offloading through bridge interfaces (e.g. br-wan,
+br-lan), enabling WAN blind-plugging (e.g. bridging 2.5G RJ45 and 10G SFP WAN ports)
+and PPPoE/DHCP over bridge without requiring Linux bonding.
+
+Key features:
+1. Dynamically identify WAN interfaces (wan, sfp-wan, br-wan, pppoe-*) and LAN
+   interfaces (lan*, sfp-lan, br-lan, bond*) instead of strict name prefix match.
+2. Resolve bridge master interfaces to underlying physical egress ports via FDB
+   lookup (br_fdb_find_rcu) for both PPPoE and routed/bridged traffic.
+3. Automatically enable GMAC PPE forwarding on all bridge member ports when bridge
+   is brought UP.
+4. Flush bound PPE entries when a bridge port drops carrier, enabling fast and
+   seamless WAN blind-plugging failover between RJ45 and SFP ports.
+5. Prevent invalid netdev_priv() access on bridge net_device instances.
+
+Signed-off-by: MediaTek Inc.
+---
+--- a/drivers/net/ethernet/mediatek/mtk_hnat/Makefile
++++ b/drivers/net/ethernet/mediatek/mtk_hnat/Makefile
+@@ -4,6 +4,7 @@
+ #
+ 
+ ccflags-y=-Werror
++ccflags-y += -I$(srctree)/net/bridge
+ 
+ obj-$(CONFIG_NET_MEDIATEK_HNAT)         += mtkhnat.o
+ mtkhnat-objs := hnat.o hnat_nf_hook.o hnat_debugfs.o hnat_mcast.o hnat_stag.o hnat_api.o
+--- a/drivers/net/ethernet/mediatek/mtk_hnat/hnat.h
++++ b/drivers/net/ethernet/mediatek/mtk_hnat/hnat.h
+@@ -1344,11 +1344,9 @@ enum FoeIpAct {
+ #define LAN_DEV_NAME hnat_priv->lan
+ #define LAN2_DEV_NAME hnat_priv->lan2
+ #define IS_ETH_GRP(dev) (IS_LAN_GRP(dev) || IS_WAN(dev))
+-#define IS_WAN(dev) (!strncmp((dev)->name, WAN_DEV_NAME, strlen(WAN_DEV_NAME)))
++#define IS_WAN(dev) is_hnat_wan_dev(dev)
+ #define IS_LAN_GRP(dev) (IS_LAN(dev) | IS_LAN2(dev))
+-#define IS_LAN(dev)								\
+-	(!strncmp(dev->name, LAN_DEV_NAME, strlen(LAN_DEV_NAME)) ||		\
+-	 IS_BOND(dev))
++#define IS_LAN(dev) is_hnat_lan_dev(dev)
+ #define IS_LAN2(dev)								\
+ 	(!strncmp(dev->name, LAN2_DEV_NAME, strlen(LAN2_DEV_NAME)) ||		\
+ 	 IS_BOND(dev))
+@@ -1455,6 +1453,90 @@ enum FoeIpAct {
+ extern const struct of_device_id of_hnat_match[];
+ extern struct mtk_hnat *hnat_priv;
+ 
++static inline bool is_hnat_wan_dev(const struct net_device *dev)
++{
++	if (!dev || !dev->name[0])
++		return false;
++
++	if (netif_is_bridge_port(dev)) {
++		struct net_device *br;
++
++		rcu_read_lock();
++		br = netdev_master_upper_dev_get_rcu((struct net_device *)dev);
++		if (br) {
++			if (!strncmp(br->name, "br-wan", 6)) {
++				rcu_read_unlock();
++				return true;
++			}
++			if (!strncmp(br->name, "br-lan", 6)) {
++				rcu_read_unlock();
++				return false;
++			}
++		}
++		rcu_read_unlock();
++	}
++
++	if (hnat_priv && hnat_priv->wan[0] &&
++	    !strncmp(dev->name, hnat_priv->wan, strlen(hnat_priv->wan)))
++		return true;
++
++	if (!strncmp(dev->name, "wan", 3))
++		return true;
++
++	if (!strcmp(dev->name, "sfp-wan"))
++		return true;
++
++	if (!strncmp(dev->name, "br-wan", 6))
++		return true;
++
++	if (!strncmp(dev->name, "pppoe-", 6))
++		return true;
++
++	return false;
++}
++
++static inline bool is_hnat_lan_dev(const struct net_device *dev)
++{
++	if (!dev || !dev->name[0])
++		return false;
++
++	if (netif_is_bridge_port(dev)) {
++		struct net_device *br;
++
++		rcu_read_lock();
++		br = netdev_master_upper_dev_get_rcu((struct net_device *)dev);
++		if (br) {
++			if (!strncmp(br->name, "br-lan", 6)) {
++				rcu_read_unlock();
++				return true;
++			}
++			if (!strncmp(br->name, "br-wan", 6)) {
++				rcu_read_unlock();
++				return false;
++			}
++		}
++		rcu_read_unlock();
++	}
++
++	if (hnat_priv && hnat_priv->lan[0] &&
++	    !strncmp(dev->name, hnat_priv->lan, strlen(hnat_priv->lan)))
++		return true;
++
++	if (!strncmp(dev->name, "lan", 3))
++		return true;
++
++	if (!strcmp(dev->name, "sfp-lan"))
++		return true;
++
++	if (!strncmp(dev->name, "br-lan", 6))
++		return true;
++
++	if (!strncmp(dev->name, "bond", 4))
++		return true;
++
++	return false;
++}
++
+ int hnat_dsa_fill_stag(const struct net_device *netdev,
+ 		       struct foe_entry *entry,
+ 		       u16 eth_proto, int mape);
+--- a/drivers/net/ethernet/mediatek/mtk_hnat/hnat_nf_hook.c
++++ b/drivers/net/ethernet/mediatek/mtk_hnat/hnat_nf_hook.c
+@@ -14,6 +14,7 @@
+ #include <linux/netfilter_bridge.h>
+ #include <linux/netfilter_ipv6.h>
+ #include <linux/if_bridge.h>
++#include "br_private.h"
+ 
+ #include <net/arp.h>
+ #include <net/neighbour.h>
+@@ -293,6 +294,11 @@ static void foe_clear_ethdev_bind_entrie
+ 	u32 dsa_tag;
+ 
+ 	/* Get the master device if the device is slave device */
++	if (netif_is_bridge_master(dev)) {
++		foe_clear_all_bind_entries();
++		return;
++	}
++
+ 	port_id = hnat_dsa_get_port(&master_dev);
+ 	mac = netdev_priv(master_dev);
+ 	gmac = HNAT_GMAC_FP(mac->id);
+@@ -387,6 +393,19 @@ static void gmac_ppe_fwd_enable(struct n
+ 	struct mtk_mac *mac;
+ 	int i;
+ 
++	if (netif_is_bridge_master(dev)) {
++		struct net_bridge *br = netdev_priv(dev);
++		struct net_bridge_port *p;
++
++		rcu_read_lock();
++		list_for_each_entry_rcu(p, &br->port_list, list) {
++			if (p->dev)
++				gmac_ppe_fwd_enable(p->dev);
++		}
++		rcu_read_unlock();
++		return;
++	}
++
+ 	if (dsa_user_dev_check(master_dev))
+ 		hnat_dsa_get_port(&master_dev);
+ 
+@@ -425,8 +444,8 @@ int nf_hnat_netdevice_event(struct notif
+ 	case NETDEV_CHANGE:
+ 		hnat_handle_ext_eth_link_change(dev);
+ 
+-		/* Clear PPE entries if the slave of bond device physical link down */
+-		if (!netif_is_bond_slave(dev) ||
++		/* Clear PPE entries if the slave of bond/bridge device physical link down */
++		if ((!netif_is_bond_slave(dev) && !netif_is_bridge_port(dev)) ||
+ 		    (!IS_LAN_GRP(dev) && !IS_WAN(dev)))
+ 			break;
+ 
+@@ -1448,6 +1467,41 @@ drop:
+ 	return NF_DROP;
+ }
+ 
++/* Resolve bridge master to its physical/slave egress port via FDB */
++static struct net_device *hnat_bridge_resolve_port(struct net_device *br_dev,
++						   const unsigned char *dmac,
++						   u16 vid)
++{
++	struct net_bridge *br;
++	struct net_bridge_fdb_entry *f;
++	struct net_bridge_port *dst;
++	struct net_device *egress_dev = NULL;
++
++	if (!br_dev || !netif_is_bridge_master(br_dev))
++		return NULL;
++
++	if (!dmac || !is_valid_ether_addr(dmac))
++		return NULL;
++
++	br = netdev_priv(br_dev);
++	if (!br)
++		return NULL;
++
++	rcu_read_lock();
++	f = br_fdb_find_rcu(br, dmac, vid);
++	if (!f && vid)
++		f = br_fdb_find_rcu(br, dmac, 0);
++
++	if (f && !test_bit(BR_FDB_LOCAL, &f->flags)) {
++		dst = READ_ONCE(f->dst);
++		if (dst && dst->dev)
++			egress_dev = dst->dev;
++	}
++	rcu_read_unlock();
++
++	return egress_dev;
++}
++
+ /* Don't bind unknown-unicast (FDB miss) flows to the PPE — that would
+  * pin them to one egress port and break bridge MAC learning.
+  */
+@@ -2211,6 +2265,20 @@ int hnat_bind_crypto_entry(struct sk_buf
+ hnat_skip_fill_inner:
+ 	entry = ppe_fill_info_blk(entry, &hw_path);
+ 
++	if (netif_is_bridge_master(dev)) {
++		struct net_device *br_slave;
++
++		br_slave = hnat_bridge_resolve_port((struct net_device *)dev,
++						    hw_path.eth_dest,
++						    hw_path.vlan_id);
++		if (br_slave) {
++			dev = br_slave;
++			master_dev = br_slave;
++		} else {
++			return -1;
++		}
++	}
++
+ 	if (IS_LAN_GRP(dev) || IS_WAN(dev)) { /* Forward to GMAC Ports */
+ 		master_dev = (struct net_device *)dev;
+ 		port_id = hnat_dsa_get_port(&master_dev);
+@@ -2844,6 +2912,20 @@ hnat_entry_bind:
+ 	/* Fill Info Blk*/
+ 	entry = ppe_fill_info_blk(entry, hw_path);
+ 
++	if (netif_is_bridge_master(dev)) {
++		struct net_device *br_slave;
++
++		br_slave = hnat_bridge_resolve_port((struct net_device *)dev,
++						    hw_path->eth_dest,
++						    hw_path->vlan_id);
++		if (br_slave) {
++			dev = br_slave;
++			master_dev = br_slave;
++		} else {
++			return -1;
++		}
++	}
++
+ 	if (IS_LAN_GRP(dev) || IS_WAN(dev)) { /* Forward to GMAC Ports */
+ 		port_id = hnat_dsa_get_port(&master_dev);
+ 		if (port_id >= 0) {
+@@ -4010,6 +4092,18 @@ static unsigned int mtk_hnat_nf_post_rou
+ 		}
+ 	}
+ 
++	if (netif_is_bridge_master(hw_path.dev) && is_valid_ether_addr(hw_path.eth_dest)) {
++		struct net_device *br_slave;
++
++		br_slave = hnat_bridge_resolve_port(hw_path.dev, hw_path.eth_dest, hw_path.vlan_id);
++		if (br_slave) {
++			hw_path.dev = br_slave;
++			out = (IS_GMAC1_MODE) ? hw_path.virt_dev : hw_path.dev;
++			if (br_slave->netdev_ops->ndo_flow_offload_check)
++				br_slave->netdev_ops->ndo_flow_offload_check(&hw_path);
++		}
++	}
++
+ 	if (!IS_LAN_GRP(out) && !IS_WAN(out) && !IS_EXT(out))
+ 		is_virt_dev = true;
+ 
+@@ -4055,6 +4149,18 @@ static unsigned int mtk_hnat_nf_post_rou
+ 			} else if (fn(skb, arp_dev, &hw_path))
+ 				break;
+ 		}
++
++		if (netif_is_bridge_master(hw_path.dev) && is_valid_ether_addr(hw_path.eth_dest)) {
++			struct net_device *br_slave;
++
++			br_slave = hnat_bridge_resolve_port(hw_path.dev, hw_path.eth_dest, hw_path.vlan_id);
++			if (br_slave) {
++				hw_path.dev = br_slave;
++				out = (IS_GMAC1_MODE) ? hw_path.virt_dev : hw_path.dev;
++				if (br_slave->netdev_ops->ndo_flow_offload_check)
++					br_slave->netdev_ops->ndo_flow_offload_check(&hw_path);
++			}
++		}
+ 		/* skb_hnat_tops(skb) is updated in mtk_tnl_offload() */
+ 		if (skb_hnat_tops(skb)) {
+ 			memcpy(eth.h_dest, hw_path.eth_dest, ETH_ALEN);

@@ -1,0 +1,39 @@
+From: ImmortalWrt Developer <developer@immortalwrt.org>
+Subject: [PATCH] net: ethernet: mediatek: disable PPE flow offload when HNAT is enabled
+
+When CONFIG_NET_MEDIATEK_HNAT or CONFIG_NET_MEDIATEK_HNAT_MODULE is
+selected, mtk_probe() skips mtk_ppe_init() and mtk_eth_offload_init(),
+so eth->flow_table is never initialized.
+
+But mtk_eth_setup_tc() remains registered.  When nftables hardware
+flow offload is enabled (e.g. firewall -> routing/NAT offload ->
+hardware offload), nf_flow_table_offload_setup() calls:
+
+    dev->netdev_ops->ndo_setup_tc(dev, TC_SETUP_FT, bo)
+
+which registers the flow block cb.  The next flow offload work item then
+calls mtk_flow_offload_replace(), which does:
+
+    rhashtable_lookup(&eth->flow_table, &f->cookie, mtk_flow_ht_params)
+
+with eth->flow_table.tbl == NULL, causing:
+
+    Unable to handle kernel read from unreadable memory at virtual
+    address 0000000000000008
+    pc : mtk_flow_offload_replace+0x70/0x12e0
+
+Return -EOPNOTSUPP from mtk_eth_setup_tc() when the MediaTek HNAT
+driver is enabled so the mainline PPE flow offload path is not used.
+
+--- a/drivers/net/ethernet/mediatek/mtk_ppe_offload.c
++++ b/drivers/net/ethernet/mediatek/mtk_ppe_offload.c
+@@ -1042,6 +1042,9 @@
+ int mtk_eth_setup_tc(struct net_device *dev, enum tc_setup_type type,
+ 		     void *type_data)
+ {
++#if defined(CONFIG_NET_MEDIATEK_HNAT) || defined(CONFIG_NET_MEDIATEK_HNAT_MODULE)
++	return -EOPNOTSUPP;
++#endif
+ 	switch (type) {
+ 	case TC_SETUP_BLOCK:
+ 	case TC_SETUP_FT:

@@ -1,0 +1,28 @@
+#!/bin/sh /etc/rc.common
+# SPDX-License-Identifier: GPL-2.0-only
+# Copyright (C) 2026 ImmortalWrt
+
+START=95
+STOP=10
+USE_PROCD=1
+
+PROG=/usr/sbin/mtk-hqos
+
+start_service() {
+	$PROG start
+}
+
+stop_service() {
+	$PROG stop
+}
+
+reload_service() {
+	$PROG reload
+}
+
+service_triggers() {
+	procd_add_reload_trigger "mtk-hqos"
+	procd_add_reload_trigger "dhcp"
+	procd_add_reload_interface_trigger "lan"
+	procd_add_reload_interface_trigger "wan"
+}

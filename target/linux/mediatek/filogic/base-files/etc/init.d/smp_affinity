@@ -1,0 +1,51 @@
+#!/bin/sh /etc/rc.common
+# SPDX-License-Identifier: GPL-2.0-only
+
+START=99
+
+boot() {
+	start "$@"
+}
+
+start() {
+	local ncpus irq cpu mask eth_irqs mmc_irqs
+
+	ncpus=$(grep -c '^processor' /proc/cpuinfo)
+	[ "$ncpus" -lt 2 ] && return 0
+
+	# 1. Filogic Ethernet multi-queue IRQs (15100000.ethernet)
+	# On MT7988 (4 cores, 4 RX rings + TX ring):
+	#   GIC 221 -> RX Ring 0
+	#   GIC 222 -> RX Ring 1
+	#   GIC 223 -> RX Ring 2
+	#   GIC 224 -> RX Ring 3
+	#   GIC 229 -> TX Done
+	#   GIC 231 -> MISC
+	eth_irqs=$(awk -F: '/15100000.ethernet/ {print $1}' /proc/interrupts | tr -d ' ' | sort -n)
+
+	if [ -n "$eth_irqs" ]; then
+		cpu=0
+		for irq in $eth_irqs; do
+			if [ "$cpu" -lt "$ncpus" ]; then
+				mask=$(printf "%x" $((1 << cpu)))
+				echo "$mask" > /proc/irq/"$irq"/smp_affinity 2>/dev/null
+				cpu=$((cpu + 1))
+			else
+				# Bind remaining TX completion / MISC interrupts to CPU0
+				echo 1 > /proc/irq/"$irq"/smp_affinity 2>/dev/null
+			fi
+		done
+	fi
+
+	# 2. Bind eMMC / SD controller interrupt (11230000.mmc) to the last CPU core
+	# Offloads disk I/O interrupts from CPU0
+	mmc_irqs=$(awk -F: '/11230000.mmc/ {print $1}' /proc/interrupts | tr -d ' ')
+	if [ -n "$mmc_irqs" ]; then
+		mask=$(printf "%x" $((1 << (ncpus - 1))))
+		for irq in $mmc_irqs; do
+			echo "$mask" > /proc/irq/"$irq"/smp_affinity 2>/dev/null
+		done
+	fi
+
+	logger -t "smp_affinity" "Optimized Ethernet and peripheral IRQ affinity for $ncpus cores"
+}

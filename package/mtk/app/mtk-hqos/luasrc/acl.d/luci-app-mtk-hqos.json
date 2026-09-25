@@ -1,0 +1,19 @@
+{
+	"luci-app-mtk-hqos": {
+		"description": "Grant access for MediaTek Hardware QoS",
+		"read": {
+			"cgi-io": [ "exec" ],
+			"file": {
+				"/usr/sbin/mtk-hqos status": [ "exec" ],
+				"/usr/sbin/mtk-hqos": [ "exec" ]
+			},
+			"ubus": {
+				"file": [ "exec" ]
+			},
+			"uci": [ "mtk-hqos" ]
+		},
+		"write": {
+			"uci": [ "mtk-hqos" ]
+		}
+	}
+}

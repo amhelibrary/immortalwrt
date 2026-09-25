@@ -1,0 +1,183 @@
+msgid ""
+msgstr ""
+"Content-Type: text/plain; charset=UTF-8\n"
+"Project-Id-Version: luci-app-mtk-hqos\n"
+"Language: zh_Hant\n"
+"Plural-Forms: nplurals=1; plural=0;\n"
+
+msgid "MediaTek HQoS"
+msgstr "聯發科硬體 QoS"
+
+msgid "Hardware QoS"
+msgstr "硬體 QoS"
+
+msgid "Grant access to MediaTek Hardware QoS"
+msgstr "授予存取聯發科硬體 QoS 的權限"
+
+msgid "MediaTek Hardware QoS (HQoS)"
+msgstr "MediaTek 硬體 QoS (HQoS)"
+
+msgid "High-performance line-rate QoS rate limiter powered by MediaTek Filogic / MTK QDMA hardware queues, supporting independent IPv4/IPv6 and MAC rate limiting under hardware NAT acceleration."
+msgstr "基於聯發科 Filogic / MTK 網卡內建 QDMA 硬體隊列的高性能線速限速引擎，支援硬體 NAT 加速下的 IPv4/IPv6 與 MAC 獨立限速。"
+
+msgid "Running Status"
+msgstr "運作狀態"
+
+msgid "Service Status"
+msgstr "服務狀態"
+
+msgid "Running (Hardware Active)"
+msgstr "正在運行 (硬體加速生效)"
+
+msgid "Stopped (Disabled / Inactive)"
+msgstr "未運行 (未啟用)"
+
+msgid "Hardware Acceleration Engine"
+msgstr "硬體加速引擎"
+
+msgid "mtkhnat driver not detected"
+msgstr "未偵測到 mtkhnat 驅動"
+
+msgid "Available QDMA Hardware Queues"
+msgstr "可用 QDMA 硬體隊列"
+
+msgid "hardware TX queues"
+msgstr "個硬體 TX 隊列"
+
+msgid "Collecting data..."
+msgstr "正在收集資料..."
+
+msgid "Global Bandwidth Settings"
+msgstr "全域頻寬設定"
+
+msgid "Enable MTK Hardware QoS"
+msgstr "啟用 MTK 硬體限速"
+
+msgid "Global Download Bandwidth (Mbit/s) [Optional]"
+msgstr "全域總下載頻寬 (Mbit/s) [可選]"
+
+msgid "Leave empty for unconstrained line-rate (recommended). Set only if you need to limit total WAN throughput or mitigate Bufferbloat."
+msgstr "留空表示不對全域總線速率進行強制限制（推薦）。僅當需要控制整機總下行上限或抑制 Bufferbloat 時填寫。"
+
+msgid "Unlimited"
+msgstr "留空不限制"
+
+msgid "Global Upload Bandwidth (Mbit/s) [Optional]"
+msgstr "全域總上傳頻寬 (Mbit/s) [可選]"
+
+msgid "Leave empty for unconstrained line-rate (recommended)."
+msgstr "留空表示不對全域總線速率進行強制限制（推薦）。"
+
+msgid "QDMA Scheduling Policy"
+msgstr "QDMA 調度策略"
+
+msgid "Hardware queue scheduling algorithm. WRR is recommended for most traffic shaping scenarios."
+msgstr "硬體隊列調度演算法。WRR 適合絕大多數頻寬整形場景。"
+
+msgid "Weighted Round Robin (WRR)"
+msgstr "加權輪詢 (WRR - Weighted Round Robin)"
+
+msgid "Strict Priority (SP)"
+msgstr "嚴格優先級 (SP - Strict Priority)"
+
+msgid "IP / MAC Bandwidth Limits"
+msgstr "基於 IP / MAC 位址限速"
+
+msgid "Allocate independent QDMA hardware queues for specific LAN devices to accurately throttle IPv4 and IPv6 traffic while maintaining hardware NAT acceleration."
+msgstr "為區域網路指定裝置分配獨立的 QDMA 硬體限速隊列，在維持硬體加速的同時精準限制 IPv4 與 IPv6 速率。"
+
+msgid "Enabled"
+msgstr "啟用"
+
+msgid "Match Type"
+msgstr "匹配類型"
+
+msgid "IP Address (IPv4 / IPv6)"
+msgstr "IP 位址 (支援 IPv4 / IPv6)"
+
+msgid "MAC Address"
+msgstr "MAC 位址"
+
+msgid "IP Address"
+msgstr "IP 位址"
+
+msgid "Download Limit (Mbit/s)"
+msgstr "下載限速 (Mbit/s)"
+
+msgid "Upload Limit (Mbit/s)"
+msgstr "上傳限速 (Mbit/s)"
+
+msgid "Description"
+msgstr "裝置備註"
+
+msgid "e.g. Office PC / Phone"
+msgstr "例如：桌上型電腦 / 手機"
+
+msgid "Active Rate Limited Targets & IP Bindings"
+msgstr "目前生效裝置限速與 IP 綁定"
+
+msgid "Hardware NAT flow table bindings and allocated queue mappings."
+msgstr "硬體 NAT 流表綁定與已分配隊列映射關係。"
+
+msgid "Target"
+msgstr "目標裝置"
+
+msgid "IPv4 Address"
+msgstr "IPv4 位址"
+
+msgid "Associated IPv6 Address(es)"
+msgstr "關聯 IPv6 位址"
+
+msgid "Download Queue / Rate"
+msgstr "下行隊列 / 限速"
+
+msgid "Upload Queue / Rate"
+msgstr "上行隊列 / 限速"
+
+msgid "None"
+msgstr "無"
+
+msgid "Download"
+msgstr "下載"
+
+msgid "Upload"
+msgstr "上傳"
+
+msgid "No active rate limited devices."
+msgstr "目前未偵測到生效限速裝置（請在下方規則中設定並啟用）。"
+
+msgid "Active Hardware Queue Monitor (QDMA TX Queues)"
+msgstr "活躍硬體隊列即時監控 (QDMA TX Queues)"
+
+msgid "Real-time packet counters and rate limiting status on MediaTek network hardware queues."
+msgstr "聯發科網卡硬體隊列的即時封包轉發計數與限速狀態監控。"
+
+msgid "Queue ID"
+msgstr "硬體隊列"
+
+msgid "Queue Role / Target"
+msgstr "隊列角色 / 目標裝置"
+
+msgid "Rate Limit"
+msgstr "硬體速率限制"
+
+msgid "Transmitted Packets"
+msgstr "轉發封包數"
+
+msgid "Transmitted Bytes"
+msgstr "轉發總流量"
+
+msgid "Hardware Drops"
+msgstr "硬體丟包數"
+
+msgid "Default Queue (Unshaped)"
+msgstr "預設隊列 (不限速線速)"
+
+msgid "Unlimited (Line-rate)"
+msgstr "無限制 (全速線速)"
+
+msgid "No active queue statistics available."
+msgstr "暫無活躍隊列統計資訊。"
+
+msgid "Service is stopped."
+msgstr "服務未運行（未啟用硬體限速）。"

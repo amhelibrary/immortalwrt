@@ -1,0 +1,44 @@
+From 1322cabee3178d17ea8961721c60d2682b5ed758 Mon Sep 17 00:00:00 2001
+From: Martin Tang <martin.tang@mediatek.com>
+Date: Tue, 11 Aug 2026 15:00:00 +0800
+Subject: [PATCH] Limit WPS settings to array capacity
+
+Stop parsing AP and STA WPS settings once the destination arrays are full. This prevents oversized local settings files from writing past the fixed arrays.
+
+Signed-off-by: Martin Tang <martin.tang@mediatek.com>
+---
+ vendor_specific_dut.c | 12 ++++++++++++
+ 1 file changed, 12 insertions(+)
+
+diff --git a/vendor_specific_dut.c b/vendor_specific_dut.c
+index 9819f54..8e68944 100644
+--- a/vendor_specific_dut.c
++++ b/vendor_specific_dut.c
+@@ -449,6 +449,12 @@ wps_setting* __get_wps_setting(int len, char *buffer, enum wps_device_role role)
+         memset(customized_wps_settings_ap, 0, sizeof(customized_wps_settings_ap));
+         p_wps_setting = customized_wps_settings_ap;
+         while (token != NULL) {
++            if (i >= AP_SETTING_NUM) {
++                indigo_logger(LOG_LEVEL_WARNING,
++                        "APUT WPS settings exceed AP_SETTING_NUM (%d), ignoring remaining settings",
++                        AP_SETTING_NUM);
++                break;
++            }
+             s = &p_wps_setting[i++];
+             save_wsc_setting(s, token, strlen(token));
+             token = strtok(NULL, ",");
+@@ -457,6 +463,12 @@ wps_setting* __get_wps_setting(int len, char *buffer, enum wps_device_role role)
+         memset(customized_wps_settings_sta, 0, sizeof(customized_wps_settings_sta));
+         p_wps_setting = customized_wps_settings_sta;
+         while (token != NULL) {
++            if (i >= STA_SETTING_NUM) {
++                indigo_logger(LOG_LEVEL_WARNING,
++                        "STAUT WPS settings exceed STA_SETTING_NUM (%d), ignoring remaining settings",
++                        STA_SETTING_NUM);
++                break;
++            }
+             s = &p_wps_setting[i++];
+             save_wsc_setting(s, token, strlen(token));
+             token = strtok(NULL, ",");
+--
+2.45.2

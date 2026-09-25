@@ -91,6 +91,7 @@ ifneq ($(CONFIG_USE_APK),)
   $(curdir)//compile += $(BUILD_KEY_APK_SEC) $(BUILD_KEY_APK_PUB)
 endif
 endif
+$(curdir)/compile: $(curdir)/dtc/host/compile
 
 $(curdir)/install: $(TMP_DIR)/.build $(curdir)/merge $(curdir)/merge-index
 	- find $(STAGING_DIR_ROOT) -type d | $(XARGS) chmod 0755

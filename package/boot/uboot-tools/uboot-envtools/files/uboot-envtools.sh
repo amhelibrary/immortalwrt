@@ -59,6 +59,7 @@ ubootenv_add_sys_mtd() {
 
 ubootenv_add_mmc() {
 	local mmcpart="$(find_mmc_part "${1}" "${2}")"
+	[ -z "$mmcpart" -a "${1}" = "ubootenv" ] && mmcpart="$(find_mmc_part "u-boot-env" "${2}")"
 	[ -n "$mmcpart" ] && \
 		ubootenv_add_uci_config "$mmcpart" "${3}" "${4}" "${5}" "${6}"
 }

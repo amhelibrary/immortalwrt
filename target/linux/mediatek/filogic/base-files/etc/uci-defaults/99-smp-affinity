@@ -1,0 +1,14 @@
+#!/bin/sh
+# SPDX-License-Identifier: GPL-2.0-only
+
+# Enable smp_affinity service for autostart on boot and apply immediately
+/etc/init.d/smp_affinity enable
+/etc/init.d/smp_affinity start
+
+# Turn off software packet_steering since hardware RSS multi-queue is active
+if uci -q get network.@globals[0] >/dev/null; then
+	uci -q set network.@globals[0].packet_steering="0"
+	uci -q commit network
+fi
+
+exit 0

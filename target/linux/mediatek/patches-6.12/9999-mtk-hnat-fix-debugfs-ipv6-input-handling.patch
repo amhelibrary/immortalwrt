@@ -1,0 +1,32 @@
+From: ImmortalWrt Developer <developer@immortalwrt.org>
+Subject: [PATCH] net: ethernet: mediatek: hnat: fix debugfs input buffer size for IPv6 entry deletion
+
+In hnat_debugfs.c, hnat_entry_write() defines `char buf[32];` and rejects
+any input string with `len >= sizeof(buf)` by printing "input handling fail!".
+
+Standard IPv6 address strings are up to 39 characters in length, which
+together with the command prefix "10 " and trailing newline totals 43 bytes.
+This causes command 10 (delete_entry_by_ip for IPv6) to always fail on standard
+IPv6 addresses. Furthermore, p_delimiter did not include '\r' or '\n', causing
+shorter IPv6 addresses to fail validation in in6_pton() due to trailing newlines.
+
+Increase buf to 64 bytes and add "\r\n" to p_delimiter to allow valid IPv6
+addresses to be processed cleanly.
+
+--- a/drivers/net/ethernet/mediatek/mtk_hnat/hnat_debugfs.c
++++ b/drivers/net/ethernet/mediatek/mtk_hnat/hnat_debugfs.c
+@@ -2172,12 +2172,12 @@ static int hnat_entry_read(struct seq_fi
+ static ssize_t hnat_entry_write(struct file *file, const char __user *buffer,
+ 				size_t count, loff_t *data)
+ {
+-	char buf[32];
++	char buf[64];
+ 	char *p_buf;
+ 	u32 len = count;
+ 	long arg0 = 0, arg1 = 0;
+ 	char *p_token = NULL;
+-	char *p_delimiter = " \t";
++	char *p_delimiter = " \t\r\n";
+ 	int ret;
+ 	bool is_ipv4 = true;
+ 

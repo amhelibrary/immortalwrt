@@ -1,0 +1,627 @@
+#!/bin/sh
+# SPDX-License-Identifier: GPL-2.0-only
+# MediaTek Hardware QoS (HQoS) Control Engine
+# Supports IPv4, IPv6, and MAC based bandwidth shaping on MediaTek QDMA & HNAT
+# Isolates targeted rate-limited devices so other devices run at full wire speed.
+
+[ -f /lib/functions.sh ] && . /lib/functions.sh
+
+STATE_FILE="/var/run/mtk-hqos.state"
+LOCK_FILE="/var/run/mtk-hqos.lock"
+
+log() {
+	logger -t mtk-hqos "$@"
+}
+
+find_debug_paths() {
+	DEBUG_DIR=""
+	TOGGLE_PATH=""
+
+	# Check QDMA interface debugfs
+	if [ -d /sys/kernel/debug/mtketh ]; then
+		DEBUG_DIR="/sys/kernel/debug/mtketh"
+	elif [ -d /sys/kernel/debug/hnat ]; then
+		DEBUG_DIR="/sys/kernel/debug/hnat"
+	elif [ -d /sys/kernel/debug/mtk_ppe ]; then
+		DEBUG_DIR="/sys/kernel/debug/mtk_ppe"
+	fi
+
+	# Check qos_toggle debugfs
+	if [ -f /sys/kernel/debug/hnat/qos_toggle ]; then
+		TOGGLE_PATH="/sys/kernel/debug/hnat/qos_toggle"
+	elif [ -f /sys/kernel/debug/mtk_ppe/qos_toggle ]; then
+		TOGGLE_PATH="/sys/kernel/debug/mtk_ppe/qos_toggle"
+	fi
+
+	# Fix write permissions created with S_IRUGO (0444) by kernel
+	chmod 666 /sys/kernel/debug/hnat/qos_toggle 2>/dev/null || true
+	chmod 666 /sys/kernel/debug/mtk_ppe/qos_toggle 2>/dev/null || true
+	chmod 666 /sys/kernel/debug/hnat/hnat_entry 2>/dev/null || true
+	chmod 666 /sys/kernel/debug/mtk_ppe/hash 2>/dev/null || true
+}
+
+get_max_queues() {
+	local count=0
+	if [ -n "$DEBUG_DIR" ]; then
+		count=$(ls -d ${DEBUG_DIR}/qdma_txq* 2>/dev/null | wc -l)
+	fi
+	[ "$count" -lt 16 ] && count=16
+	echo "$count"
+}
+
+get_ip_by_mac() {
+	local target_mac=$(echo "$1" | tr 'A-Z' 'a-z')
+	local ip=""
+	[ -f /tmp/dhcp.leases ] && ip=$(awk -v m="$target_mac" 'tolower($2) == m {print $3}' /tmp/dhcp.leases | tail -n 1)
+	[ -z "$ip" ] && [ -f /proc/net/arp ] && ip=$(awk -v m="$target_mac" 'tolower($4) == m {print $1}' /proc/net/arp | tail -n 1)
+	[ -z "$ip" ] && command -v ip >/dev/null 2>&1 && ip=$(ip -4 neigh show 2>/dev/null | awk -v m="$target_mac" 'tolower($5) == m {print $1}' | tail -n 1)
+	echo "$ip"
+}
+
+get_mac_by_ip() {
+	local target_ip="$1"
+	local mac=""
+	[ -f /tmp/dhcp.leases ] && mac=$(awk -v ip="$target_ip" '$3 == ip {print tolower($2)}' /tmp/dhcp.leases | tail -n 1)
+	[ -z "$mac" ] && [ -f /proc/net/arp ] && mac=$(awk -v ip="$target_ip" '$1 == ip {print tolower($4)}' /proc/net/arp | tail -n 1)
+	[ -z "$mac" ] && command -v ip >/dev/null 2>&1 && mac=$(ip -4 neigh show "$target_ip" 2>/dev/null | awk '{print tolower($5)}' | tail -n 1)
+	echo "$mac"
+}
+
+get_mac_by_ip6() {
+	local target_ip="$1"
+	local mac=""
+	command -v ip >/dev/null 2>&1 && mac=$(ip -6 neigh show "$target_ip" 2>/dev/null | awk '{print tolower($5)}' | head -n 1)
+	if [ -z "$mac" ] && [ -f /tmp/odhcpd.leases ]; then
+		mac=$(awk -v ip="$target_ip" '$3 ~ ip {print tolower($6)}' /tmp/odhcpd.leases | head -n 1)
+	fi
+	echo "$mac"
+}
+
+get_ip6_by_mac() {
+	local target_mac=$(echo "$1" | tr 'A-Z' 'a-z')
+	local ip6_list=""
+
+	# 1. Query kernel IPv6 neighbor table
+	if command -v ip >/dev/null 2>&1; then
+		local neigh_ips=$(ip -6 neigh show 2>/dev/null | awk -v m="$target_mac" 'tolower($5) == m && $1 !~ /^fe80/ {print $1}')
+		for ip in $neigh_ips; do
+			case " $ip6_list " in
+				*" $ip "*) ;;
+				*) ip6_list="${ip6_list} ${ip}" ;;
+			esac
+		done
+	fi
+
+	# 2. Query odhcpd lease records
+	if [ -f /tmp/odhcpd.leases ]; then
+		local lease_ips=$(awk -v m="$target_mac" 'tolower($6) == m {print $3}' /tmp/odhcpd.leases 2>/dev/null | sed 's/\/.*//' | grep -v '^fe80')
+		for ip in $lease_ips; do
+			case " $ip6_list " in
+				*" $ip "*) ;;
+				*) ip6_list="${ip6_list} ${ip}" ;;
+			esac
+		done
+	fi
+
+	# 3. Query odhcpd hosts map
+	if [ -f /tmp/hosts/odhcpd ]; then
+		local host_ips=$(grep -E '^[0-9a-fA-F:]+' /tmp/hosts/odhcpd 2>/dev/null | awk '{print $1}' | grep -v '^fe80')
+		for ip in $host_ips; do
+			local test_mac=""
+			command -v ip >/dev/null 2>&1 && test_mac=$(ip -6 neigh show "$ip" 2>/dev/null | awk '{print tolower($5)}')
+			if [ "$test_mac" = "$target_mac" ]; then
+				case " $ip6_list " in
+					*" $ip "*) ;;
+					*) ip6_list="${ip6_list} ${ip}" ;;
+				esac
+			fi
+		done
+	fi
+
+	# 4. Fallback to ubus hosthints if available
+	if command -v ubus >/dev/null 2>&1; then
+		local ubus_ips=$(ubus call luci-rpc getHostHints 2>/dev/null | grep -A 10 -i "$target_mac" | grep -oE '[0-9a-fA-F:]+:[0-9a-fA-F:]+' | grep -v '^fe80' | grep ':')
+		for ip in $ubus_ips; do
+			# Exclude MAC address patterns (6 hex groups with 5 colons)
+			echo "$ip" | grep -qiE '^([0-9a-f]{1,2}:){5}[0-9a-f]{1,2}$' && continue
+			case " $ip6_list " in
+				*" $ip "*) ;;
+				*) ip6_list="${ip6_list} ${ip}" ;;
+			esac
+		done
+	fi
+
+	echo "$ip6_list"
+}
+
+flush_firewall() {
+	if command -v nft >/dev/null 2>&1; then
+		nft delete table inet mtk_hqos 2>/dev/null || true
+	fi
+
+	if command -v iptables >/dev/null 2>&1; then
+		iptables -t mangle -D PREROUTING -j MTK_HQOS_PRE 2>/dev/null || true
+		iptables -t mangle -F MTK_HQOS_PRE 2>/dev/null || true
+		iptables -t mangle -X MTK_HQOS_PRE 2>/dev/null || true
+		iptables -t mangle -D FORWARD -j MTK_HQOS_FWD 2>/dev/null || true
+		iptables -t mangle -F MTK_HQOS_FWD 2>/dev/null || true
+		iptables -t mangle -X MTK_HQOS_FWD 2>/dev/null || true
+		iptables -t mangle -D POSTROUTING -j MTK_HQOS_POST 2>/dev/null || true
+		iptables -t mangle -F MTK_HQOS_POST 2>/dev/null || true
+		iptables -t mangle -X MTK_HQOS_POST 2>/dev/null || true
+	fi
+
+	if command -v ip6tables >/dev/null 2>&1; then
+		ip6tables -t mangle -D PREROUTING -j MTK_HQOS_PRE 2>/dev/null || true
+		ip6tables -t mangle -F MTK_HQOS_PRE 2>/dev/null || true
+		ip6tables -t mangle -X MTK_HQOS_PRE 2>/dev/null || true
+		ip6tables -t mangle -D FORWARD -j MTK_HQOS_FWD 2>/dev/null || true
+		ip6tables -t mangle -F MTK_HQOS_FWD 2>/dev/null || true
+		ip6tables -t mangle -X MTK_HQOS_FWD 2>/dev/null || true
+		ip6tables -t mangle -D POSTROUTING -j MTK_HQOS_POST 2>/dev/null || true
+		ip6tables -t mangle -F MTK_HQOS_POST 2>/dev/null || true
+		ip6tables -t mangle -X MTK_HQOS_POST 2>/dev/null || true
+	fi
+}
+
+reset_hardware() {
+	find_debug_paths
+	[ -f /sys/kernel/debug/hnat/qos_toggle ] && echo 0 > /sys/kernel/debug/hnat/qos_toggle 2>/dev/null || true
+	[ -f /sys/kernel/debug/mtk_ppe/qos_toggle ] && echo 0 > /sys/kernel/debug/mtk_ppe/qos_toggle 2>/dev/null || true
+
+	if [ -n "$DEBUG_DIR" ]; then
+		for sch in 0 1 2 3; do
+			[ -e "$DEBUG_DIR/qdma_sch$sch" ] && echo "0 wrr 0" > "$DEBUG_DIR/qdma_sch$sch" 2>/dev/null
+		done
+		local max_q=$(get_max_queues)
+		for q in $(seq 0 $((max_q - 1))); do
+			# Default queue settings: max_enable=0 (no limit), weight=15 (top priority), min_rate=10Mbps, resv=4
+			[ -e "$DEBUG_DIR/qdma_txq$q" ] && echo "0 1 10000 0 0 15 4" > "$DEBUG_DIR/qdma_txq$q" 2>/dev/null
+		done
+	fi
+
+	# Flush conntrack and hardware offload bindings
+	command -v conntrack >/dev/null 2>&1 && conntrack -F 2>/dev/null || true
+	[ -f /sys/kernel/debug/mtk_ppe/hash ] && echo 0 > /sys/kernel/debug/mtk_ppe/hash 2>/dev/null || true
+
+	rm -f "$STATE_FILE"
+}
+
+start_hqos() {
+	find_debug_paths
+
+	if [ -z "$DEBUG_DIR" ] || [ -z "$TOGGLE_PATH" ]; then
+		# Try loading mtkhnat module if not present
+		modprobe mtkhnat 2>/dev/null || true
+		sleep 1
+		find_debug_paths
+	fi
+
+	if [ -z "$DEBUG_DIR" ] || [ -z "$TOGGLE_PATH" ]; then
+		log "Error: MediaTek HQoS debugfs node not found. Check if mtkhnat or mtk_ppe is active."
+		return 1
+	fi
+
+	config_load "mtk-hqos"
+	local enabled global_dl global_ul scheduling
+	config_get_bool enabled "global" "enabled" "0"
+	[ "$enabled" -eq 1 ] || {
+		stop_hqos
+		return 0
+	}
+
+	config_get global_dl "global" "download" ""
+	config_get global_ul "global" "upload" ""
+	config_get scheduling "global" "scheduling" "wrr"
+	[ "$scheduling" = "sp" ] || scheduling="wrr"
+
+	# Enable bridge netfilter for L2 MAC matching
+	modprobe br_netfilter 2>/dev/null || true
+	echo 1 > /proc/sys/net/bridge/bridge-nf-call-iptables 2>/dev/null || true
+	echo 1 > /proc/sys/net/bridge/bridge-nf-call-ip6tables 2>/dev/null || true
+
+	flush_firewall
+	reset_hardware
+
+	local total_queues=$(get_max_queues)
+	local max_usable_queue=$((total_queues - 1))
+
+	# Scheduler Configuration:
+	# DO NOT rate-limit Scheduler 0 unless user explicitly set global_dl!
+	# Individual queues have their own token bucket rate limiters (max_rate_en = 1).
+	# When global_dl is not set, leaving Scheduler 0 unconstrained (enable=0) ensures
+	# Queue 0 (all other clients) runs at full line rate (2.5Gbps / 1Gbps).
+	if [ -n "$global_dl" ] && [ "$global_dl" -gt 0 ]; then
+		local sch_rate=$((global_dl * 1000))
+		echo "1 ${scheduling} ${sch_rate}" > "$DEBUG_DIR/qdma_sch0" 2>/dev/null
+	else
+		echo "0 wrr 0" > "$DEBUG_DIR/qdma_sch0" 2>/dev/null
+	fi
+
+	# Scheduler 1 for uplink queues
+	if [ -n "$global_ul" ] && [ "$global_ul" -gt 0 ]; then
+		local sch1_rate=$((global_ul * 1000))
+		[ -e "$DEBUG_DIR/qdma_sch1" ] && echo "1 ${scheduling} ${sch1_rate}" > "$DEBUG_DIR/qdma_sch1" 2>/dev/null
+	else
+		[ -e "$DEBUG_DIR/qdma_sch1" ] && echo "0 wrr 0" > "$DEBUG_DIR/qdma_sch1" 2>/dev/null
+	fi
+
+	# Queue 0 is the default queue for ALL other unshaped traffic:
+	# Parameters: scheduler=0, min_en=1, min_rate=10000, max_en=0 (NO limit), max_rate=0, weight=15 (MAX priority), resv=4
+	echo "0 1 10000 0 0 15 4" > "$DEBUG_DIR/qdma_txq0" 2>/dev/null
+
+	# Initialize NFT / IPTables containers
+	local USE_NFT=0
+	if command -v nft >/dev/null 2>&1; then
+		USE_NFT=1
+		nft add table inet mtk_hqos 2>/dev/null
+		nft 'add chain inet mtk_hqos prerouting { type filter hook prerouting priority -150; policy accept; }' 2>/dev/null
+		nft 'add chain inet mtk_hqos forward { type filter hook forward priority -150; policy accept; }' 2>/dev/null
+		nft 'add chain inet mtk_hqos postrouting { type filter hook postrouting priority -150; policy accept; }' 2>/dev/null
+
+		# Restore downlink queue ID ONLY if HQoS magic tag (0x8000) is present in ct mark
+		# This completely prevents accidental mark collisions with other packages (mwan3, qosify, etc.)
+		nft add rule inet mtk_hqos prerouting ct mark \& 0x8000 == 0x8000 meta mark set ct mark \& 0x007f 2>/dev/null
+	else
+		iptables -t mangle -N MTK_HQOS_PRE 2>/dev/null
+		iptables -t mangle -I PREROUTING -j MTK_HQOS_PRE 2>/dev/null
+		iptables -t mangle -N MTK_HQOS_FWD 2>/dev/null
+		iptables -t mangle -I FORWARD -j MTK_HQOS_FWD 2>/dev/null
+		iptables -t mangle -N MTK_HQOS_POST 2>/dev/null
+		iptables -t mangle -I POSTROUTING -j MTK_HQOS_POST 2>/dev/null
+
+		iptables -t mangle -A MTK_HQOS_PRE -m connmark --mark 0x8000/0x8000 -j CONNMARK --restore-mark --mask 0x007f 2>/dev/null
+
+		if command -v ip6tables >/dev/null 2>&1; then
+			ip6tables -t mangle -N MTK_HQOS_PRE 2>/dev/null
+			ip6tables -t mangle -I PREROUTING -j MTK_HQOS_PRE 2>/dev/null
+			ip6tables -t mangle -N MTK_HQOS_FWD 2>/dev/null
+			ip6tables -t mangle -I FORWARD -j MTK_HQOS_FWD 2>/dev/null
+			ip6tables -t mangle -N MTK_HQOS_POST 2>/dev/null
+			ip6tables -t mangle -I POSTROUTING -j MTK_HQOS_POST 2>/dev/null
+
+			ip6tables -t mangle -A MTK_HQOS_PRE -m connmark --mark 0x8000/0x8000 -j CONNMARK --restore-mark --mask 0x007f 2>/dev/null
+		fi
+	fi
+
+	local cur_qid=1
+
+	# Initialize JSON state storage
+	echo "[" > "$STATE_FILE"
+	local first_entry=1
+
+	parse_device_rule() {
+		local cfg="$1"
+		local dev_enabled type ip mac download upload comment
+		config_get_bool dev_enabled "$cfg" "enabled" "1"
+		[ "$dev_enabled" -eq 1 ] || return 0
+
+		config_get type "$cfg" "type" "ip"
+		config_get ip "$cfg" "ip" ""
+		config_get mac "$cfg" "mac" ""
+		config_get download "$cfg" "download" ""
+		config_get upload "$cfg" "upload" ""
+		config_get comment "$cfg" "comment" ""
+
+		local target_ip4=""
+		local ip6_list=""
+
+		# Resolve target IP (IPv4 and IPv6) and MAC
+		if [ "$type" = "mac" ] && [ -n "$mac" ]; then
+			mac=$(echo "$mac" | tr 'A-Z' 'a-z')
+			target_ip4=$(get_ip_by_mac "$mac")
+			ip6_list=$(get_ip6_by_mac "$mac")
+		elif [ "$type" = "ip" ] && [ -n "$ip" ]; then
+			if echo "$ip" | grep -q ':'; then
+				# IPv6 address entered
+				ip6_list="$ip"
+				mac=$(get_mac_by_ip6 "$ip")
+				if [ -n "$mac" ]; then
+					target_ip4=$(get_ip_by_mac "$mac")
+					local other_ip6=$(get_ip6_by_mac "$mac")
+					for item in $other_ip6; do
+						case " $ip6_list " in *" $item "*) ;; *) ip6_list="$ip6_list $item" ;; esac
+					done
+				fi
+			else
+				# IPv4 address entered
+				target_ip4="$ip"
+				mac=$(get_mac_by_ip "$ip")
+				[ -n "$mac" ] && ip6_list=$(get_ip6_by_mac "$mac")
+			fi
+		fi
+
+		[ -z "$target_ip4" ] && [ -z "$ip6_list" ] && [ -z "$mac" ] && return 0
+
+		local dl_qid=0
+		local up_qid=0
+
+		# Allocate download queue (on Scheduler 0, WRR weight 4)
+		if [ -n "$download" ] && [ "$download" -gt 0 ]; then
+			if [ "$cur_qid" -le "$max_usable_queue" ]; then
+				dl_qid=$cur_qid
+				cur_qid=$((cur_qid + 1))
+				local rate_kbps=$((download * 1000))
+				echo "0 0 0 1 ${rate_kbps} 4 4" > "$DEBUG_DIR/qdma_txq${dl_qid}" 2>/dev/null
+			else
+				log "Warning: Ran out of hardware QDMA queues! Max is ${total_queues}."
+			fi
+		fi
+
+		# Allocate upload queue (on Scheduler 1 if present, WRR weight 4)
+		if [ -n "$upload" ] && [ "$upload" -gt 0 ]; then
+			if [ "$cur_qid" -le "$max_usable_queue" ]; then
+				up_qid=$cur_qid
+				cur_qid=$((cur_qid + 1))
+				local rate_kbps=$((upload * 1000))
+				local sch_idx=0
+				[ -e "$DEBUG_DIR/qdma_sch1" ] && sch_idx=1
+				echo "${sch_idx} 0 0 1 ${rate_kbps} 4 4" > "$DEBUG_DIR/qdma_txq${up_qid}" 2>/dev/null
+			else
+				log "Warning: Ran out of hardware QDMA queues! Max is ${total_queues}."
+			fi
+		fi
+
+		# Use HQoS magic tag (0x8000) in ct mark so only this device's flows are tracked and restored
+		local up_ctmark_hex="0x00000000"
+		local dl_ctmark_hex="0x00000000"
+		local up_mark_hex=$(printf "0x%04x" "$up_qid")
+		local dl_mark_hex=$(printf "0x%04x" "$dl_qid")
+
+		if [ "$up_qid" -gt 0 ]; then
+			local up_mark_val=$((0x8000 | up_qid))
+			up_ctmark_hex=$(printf "0x%08x" $((up_mark_val << 16)))
+		fi
+
+		if [ "$dl_qid" -gt 0 ]; then
+			local dl_mark_val=$((0x8000 | dl_qid))
+			dl_ctmark_hex=$(printf "0x%08x" "$dl_mark_val")
+		fi
+
+		# Apply firewall marking rules
+		if [ "$USE_NFT" -eq 1 ]; then
+			# Uplink rules (traffic from this specific device)
+			if [ "$up_qid" -gt 0 ]; then
+				# Match by MAC
+				if [ -n "$mac" ]; then
+					nft add rule inet mtk_hqos prerouting ether saddr "$mac" meta mark set "$up_mark_hex" ct mark set "(ct mark and 0x0000ffff) or ${up_ctmark_hex}" 2>/dev/null
+				fi
+
+				# Match by IPv4
+				if [ -n "$target_ip4" ]; then
+					nft add rule inet mtk_hqos prerouting ip saddr "$target_ip4" meta mark set "$up_mark_hex" ct mark set "(ct mark and 0x0000ffff) or ${up_ctmark_hex}" 2>/dev/null
+				fi
+
+				# Match by IPv6
+				for ip6 in $ip6_list; do
+					nft add rule inet mtk_hqos prerouting ip6 saddr "$ip6" meta mark set "$up_mark_hex" ct mark set "(ct mark and 0x0000ffff) or ${up_ctmark_hex}" 2>/dev/null
+				done
+			fi
+
+			# Downlink rules (traffic to this specific device)
+			if [ "$dl_qid" -gt 0 ]; then
+				# Match by IPv4
+				if [ -n "$target_ip4" ]; then
+					nft add rule inet mtk_hqos forward ip daddr "$target_ip4" meta mark set "$dl_mark_hex" ct mark set "(ct mark and 0xffff0000) or ${dl_ctmark_hex}" 2>/dev/null
+					nft add rule inet mtk_hqos postrouting ip daddr "$target_ip4" meta mark set "$dl_mark_hex" 2>/dev/null
+				fi
+
+				# Match by IPv6
+				for ip6 in $ip6_list; do
+					nft add rule inet mtk_hqos forward ip6 daddr "$ip6" meta mark set "$dl_mark_hex" ct mark set "(ct mark and 0xffff0000) or ${dl_ctmark_hex}" 2>/dev/null
+					nft add rule inet mtk_hqos postrouting ip6 daddr "$ip6" meta mark set "$dl_mark_hex" 2>/dev/null
+				done
+			fi
+		else
+			# IPTables & IP6Tables Fallback
+			if [ "$up_qid" -gt 0 ]; then
+				local up_ctmark_val=$(( (0x8000 | up_qid) << 16 ))
+
+				if [ -n "$mac" ]; then
+					iptables -t mangle -A MTK_HQOS_PRE -m mac --mac-source "$mac" -j MARK --set-mark "$up_qid" 2>/dev/null
+					iptables -t mangle -A MTK_HQOS_PRE -m mac --mac-source "$mac" -j CONNMARK --set-mark "${up_ctmark_val}/0xffff0000" 2>/dev/null
+					if command -v ip6tables >/dev/null 2>&1; then
+						ip6tables -t mangle -A MTK_HQOS_PRE -m mac --mac-source "$mac" -j MARK --set-mark "$up_qid" 2>/dev/null
+						ip6tables -t mangle -A MTK_HQOS_PRE -m mac --mac-source "$mac" -j CONNMARK --set-mark "${up_ctmark_val}/0xffff0000" 2>/dev/null
+					fi
+				fi
+
+				if [ -n "$target_ip4" ]; then
+					iptables -t mangle -A MTK_HQOS_PRE -s "$target_ip4" -j MARK --set-mark "$up_qid" 2>/dev/null
+					iptables -t mangle -A MTK_HQOS_PRE -s "$target_ip4" -j CONNMARK --set-mark "${up_ctmark_val}/0xffff0000" 2>/dev/null
+				fi
+
+				if command -v ip6tables >/dev/null 2>&1; then
+					for ip6 in $ip6_list; do
+						ip6tables -t mangle -A MTK_HQOS_PRE -s "$ip6" -j MARK --set-mark "$up_qid" 2>/dev/null
+						ip6tables -t mangle -A MTK_HQOS_PRE -s "$ip6" -j CONNMARK --set-mark "${up_ctmark_val}/0xffff0000" 2>/dev/null
+					done
+				fi
+			fi
+
+			if [ "$dl_qid" -gt 0 ]; then
+				local dl_ctmark_val=$(( 0x8000 | dl_qid ))
+
+				if [ -n "$target_ip4" ]; then
+					iptables -t mangle -A MTK_HQOS_FWD -d "$target_ip4" -j MARK --set-mark "$dl_qid" 2>/dev/null
+					iptables -t mangle -A MTK_HQOS_FWD -d "$target_ip4" -j CONNMARK --set-mark "${dl_ctmark_val}/0x0000ffff" 2>/dev/null
+					iptables -t mangle -A MTK_HQOS_POST -d "$target_ip4" -j MARK --set-mark "$dl_qid" 2>/dev/null
+				fi
+
+				if command -v ip6tables >/dev/null 2>&1; then
+					for ip6 in $ip6_list; do
+						ip6tables -t mangle -A MTK_HQOS_FWD -d "$ip6" -j MARK --set-mark "$dl_qid" 2>/dev/null
+						ip6tables -t mangle -A MTK_HQOS_FWD -d "$ip6" -j CONNMARK --set-mark "${dl_ctmark_val}/0x0000ffff" 2>/dev/null
+						ip6tables -t mangle -A MTK_HQOS_POST -d "$ip6" -j MARK --set-mark "$dl_qid" 2>/dev/null
+					done
+				fi
+			fi
+		fi
+
+		# Clear stale FOE entries for this host so hardware re-binds with new queues.
+		# Note: In MediaTek hnat driver, "8 $mac" invokes entry_delete_by_mac() which
+		# clears BOTH IPv4 and IPv6 entries matching this MAC address.
+		# We do NOT call "10 $ip6" because hnat_debugfs.c hardcodes char buf[32],
+		# which overflows on 39+ byte IPv6 addresses and causes "input handling fail!".
+		[ -n "$mac" ] && echo -n "8 $mac" > /sys/kernel/debug/hnat/hnat_entry 2>/dev/null || true
+		[ -n "$target_ip4" ] && echo -n "9 $target_ip4" > /sys/kernel/debug/hnat/hnat_entry 2>/dev/null || true
+
+		# Record state
+		local target_label="${target_ip4:-$mac}"
+		[ -z "$target_label" ] && target_label="$(echo "$ip6_list" | awk '{print $1}')"
+		[ -n "$comment" ] && target_label="${target_label} (${comment})"
+
+		if [ "$first_entry" -eq 1 ]; then
+			first_entry=0
+		else
+			echo "," >> "$STATE_FILE"
+		fi
+
+		cat <<EOF >> "$STATE_FILE"
+    {
+      "target": "${target_label}",
+      "ip": "${target_ip4}",
+      "ip6_list": "${ip6_list}",
+      "mac": "${mac}",
+      "dl_qid": ${dl_qid},
+      "dl_mbps": "${download:-0}",
+      "up_qid": ${up_qid},
+      "up_mbps": "${upload:-0}"
+    }
+EOF
+	}
+
+	config_foreach parse_device_rule "device"
+
+	# NFT postrouting fallback mark restoration:
+	# Only restore if HQoS magic tag (0x8000) is present in ct mark
+	if [ "$USE_NFT" -eq 1 ]; then
+		nft add rule inet mtk_hqos postrouting meta mark 0 ct mark \& 0x8000 == 0x8000 meta mark set ct mark \& 0x007f 2>/dev/null
+	else
+		iptables -t mangle -A MTK_HQOS_POST -m mark --mark 0 -m connmark --mark 0x8000/0x8000 -j CONNMARK --restore-mark --mask 0x007f 2>/dev/null
+		command -v ip6tables >/dev/null 2>&1 && ip6tables -t mangle -A MTK_HQOS_POST -m mark --mark 0 -m connmark --mark 0x8000/0x8000 -j CONNMARK --restore-mark --mask 0x007f 2>/dev/null
+	fi
+
+	echo "]" >> "$STATE_FILE"
+
+	# Flush conntrack connections and PPE flow table so active connections immediately switch to shaped queues
+	command -v conntrack >/dev/null 2>&1 && conntrack -F 2>/dev/null || true
+	[ -f /sys/kernel/debug/mtk_ppe/hash ] && echo 0 > /sys/kernel/debug/mtk_ppe/hash 2>/dev/null || true
+
+	# Enable HQoS mode in HNAT & PPE
+	[ -f /sys/kernel/debug/hnat/qos_toggle ] && echo 1 > /sys/kernel/debug/hnat/qos_toggle
+	[ -f /sys/kernel/debug/mtk_ppe/qos_toggle ] && echo 1 > /sys/kernel/debug/mtk_ppe/qos_toggle
+
+	log "MediaTek HQoS enabled successfully with complete non-target device isolation."
+}
+
+stop_hqos() {
+	flush_firewall
+	reset_hardware
+	log "MediaTek HQoS stopped and hardware queues reset."
+}
+
+status_json() {
+	find_debug_paths
+	local running=0
+	# Check if service is actively running:
+	# 1. State file exists
+	if [ -f "$STATE_FILE" ]; then
+		running=1
+	# 2. Firewall rules table is present
+	elif command -v nft >/dev/null 2>&1 && nft list table inet mtk_hqos >/dev/null 2>&1; then
+		running=1
+	elif command -v iptables >/dev/null 2>&1 && iptables -t mangle -L MTK_HQOS_PRE >/dev/null 2>&1; then
+		running=1
+	# 3. Kernel debugfs / dmesg toggle indicator
+	elif [ -n "$TOGGLE_PATH" ] && [ -f "$TOGGLE_PATH" ]; then
+		if cat "$TOGGLE_PATH" 2>/dev/null | grep -qi "enabled"; then
+			running=1
+		elif dmesg 2>/dev/null | grep -i "HQoS is" | tail -n 1 | grep -qi "enabled"; then
+			running=1
+		fi
+	fi
+
+	echo "{"
+	echo "  \"running\": $([ "$running" -eq 1 ] && echo 'true' || echo 'false'),"
+	echo "  \"toggle_path\": \"${TOGGLE_PATH}\","
+	echo "  \"debug_dir\": \"${DEBUG_DIR}\","
+	echo "  \"total_queues\": $(get_max_queues),"
+
+	# Read QDMA queue stats
+	echo '  "queue_stats": ['
+	local first_stat=1
+	if [ -n "$DEBUG_DIR" ]; then
+		for qfile in $(ls ${DEBUG_DIR}/qdma_txq* 2>/dev/null | sort -V); do
+			local qid=$(basename "$qfile" | sed 's/qdma_txq//')
+			if [ -r "$qfile" ]; then
+				local content=$(cat "$qfile" 2>/dev/null)
+				local max_en=$(echo "$content" | awk '/^max/ {print $2}')
+				local max_rate=$(echo "$content" | awk '/^max/ {print $3}')
+				local packets=$(echo "$content" | awk '/packet count:/ {print $3}')
+				local bytes=$(echo "$content" | awk '/bytes count:/ {print $3}')
+				local drops=$(echo "$content" | awk '/packet drop:/ {print $3}')
+
+				[ -z "$max_en" ] && max_en="0"
+				[ -z "$max_rate" ] && max_rate="0"
+				[ -z "$packets" ] && packets="0"
+				[ -z "$bytes" ] && bytes="0"
+				[ -z "$drops" ] && drops="0"
+
+				# Show queue 0 and any queue that has rate limiting enabled or traffic
+				if [ "$qid" -eq 0 ] || [ "$max_en" -gt 0 ] || [ "$packets" -gt 0 ]; then
+					if [ "$first_stat" -eq 1 ]; then
+						first_stat=0
+					else
+						echo ","
+					fi
+					cat <<EOF
+    {
+      "qid": ${qid},
+      "max_en": ${max_en},
+      "max_rate_kbps": ${max_rate},
+      "packets": ${packets},
+      "bytes": ${bytes},
+      "drops": ${drops}
+    }
+EOF
+				fi
+			fi
+		done
+	fi
+	echo "  ],"
+
+	# Attach allocated device rules from state file if present
+	echo '  "devices": '
+	if [ -f "$STATE_FILE" ] && [ -s "$STATE_FILE" ]; then
+		cat "$STATE_FILE" 2>/dev/null
+	else
+		echo '[]'
+	fi
+	echo "}"
+}
+
+case "$1" in
+	start)
+		start_hqos
+		;;
+	stop)
+		stop_hqos
+		;;
+	restart|reload)
+		stop_hqos
+		sleep 1
+		start_hqos
+		;;
+	refresh)
+		# Triggered by DHCP / DHCPv6 lease update to refresh MAC-IP binding
+		start_hqos
+		;;
+	status)
+		status_json
+		;;
+	*)
+		echo "Usage: $0 {start|stop|restart|reload|refresh|status}"
+		exit 1
+		;;
+esac

@@ -1,0 +1,14 @@
+{
+	"admin/network/mtk_hqos": {
+		"title": "MediaTek HQoS",
+		"order": 65,
+		"action": {
+			"type": "view",
+			"path": "mtk_hqos"
+		},
+		"depends": {
+			"acl": [ "luci-app-mtk-hqos" ],
+			"uci": { "mtk-hqos": true }
+		}
+	}
+}

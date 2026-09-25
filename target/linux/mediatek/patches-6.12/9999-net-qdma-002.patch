@@ -1,0 +1,49 @@
+--- a/drivers/net/ethernet/mediatek/mtk_eth_soc.h
++++ b/drivers/net/ethernet/mediatek/mtk_eth_soc.h
+@@ -27,7 +27,7 @@
+ #define MTK_MAX_DSA_PORTS	7
+ #define MTK_DSA_PORT_MASK	GENMASK(2, 0)
+ 
+-#define MTK_QDMA_NUM_QUEUES	16
++#define MTK_QDMA_NUM_QUEUES	64
+ #define MTK_QDMA_QUEUE_MASK	(MTK_QDMA_NUM_QUEUES - 1)
+ #define MTK_QDMA_PAGE_SIZE	2048
+ #define MTK_MAX_RX_LENGTH	1536
+--- a/drivers/net/ethernet/mediatek/mtk_eth_soc.c
++++ b/drivers/net/ethernet/mediatek/mtk_eth_soc.c
+@@ -3328,7 +3328,7 @@ static int mtk_tx_alloc(struct mtk_eth *
+ 	int i, sz = TX_DESC_OFS(eth, 1);
+ 	struct mtk_tx_dma_v2 *txd;
+ 	int ring_size;
+-	u32 ofs, val;
++	u32 val;
+ 
+ 	ring_size = soc->tx.dma_size;
+ 
+@@ -3404,9 +3404,11 @@ static int mtk_tx_alloc(struct mtk_eth *
+ 			soc->reg_map->qdma.crx_ptr);
+ 		mtk_w32(eth, ring->last_free_ptr, soc->reg_map->qdma.drx_ptr);
+ 
+-		for (i = 0, ofs = 0; i < MTK_QDMA_NUM_QUEUES; i++) {
++		for (i = 0; i < MTK_QDMA_NUM_QUEUES; i++) {
++			mtk_w32(eth, (i / MTK_QTX_PER_PAGE), soc->reg_map->qdma.page);
+ 			val = (QDMA_RES_THRES << 8) | QDMA_RES_THRES;
+-			mtk_w32(eth, val, soc->reg_map->qdma.qtx_cfg + ofs);
++			mtk_w32(eth, val, soc->reg_map->qdma.qtx_cfg +
++				(i % MTK_QTX_PER_PAGE) * MTK_QTX_OFFSET);
+ 
+ 			val = MTK_QTX_SCH_MIN_RATE_EN |
+ 			      MTK_QTX_SCH_LEAKY_BUCKET_SIZE;
+@@ -3421,9 +3423,10 @@ static int mtk_tx_alloc(struct mtk_eth *
+ 			}
+ 			if (mtk_is_netsys_v1(eth))
+ 				val |= MTK_QTX_SCH_LEAKY_BUCKET_EN;
+-			mtk_w32(eth, val, soc->reg_map->qdma.qtx_sch + ofs);
+-			ofs += MTK_QTX_OFFSET;
++			mtk_w32(eth, val, soc->reg_map->qdma.qtx_sch +
++				(i % MTK_QTX_PER_PAGE) * MTK_QTX_OFFSET);
+ 		}
++		mtk_w32(eth, 0, soc->reg_map->qdma.page);
+ 		val = MTK_QDMA_TX_SCH_MAX_WFQ | (MTK_QDMA_TX_SCH_MAX_WFQ << 16);
+ 		mtk_w32(eth, val, soc->reg_map->qdma.tx_sch_rate);
+ 		if (mtk_is_netsys_v2_or_greater(eth))

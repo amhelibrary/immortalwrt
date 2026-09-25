@@ -1,0 +1,179 @@
+msgid ""
+msgstr "Content-Type: text/plain; charset=UTF-8\n"
+
+msgid "MediaTek HQoS"
+msgstr ""
+
+msgid "Hardware QoS"
+msgstr ""
+
+msgid "Grant access to MediaTek Hardware QoS"
+msgstr ""
+
+msgid "MediaTek Hardware QoS (HQoS)"
+msgstr ""
+
+msgid "High-performance line-rate QoS rate limiter powered by MediaTek Filogic / MTK QDMA hardware queues, supporting independent IPv4/IPv6 and MAC rate limiting under hardware NAT acceleration."
+msgstr ""
+
+msgid "Running Status"
+msgstr ""
+
+msgid "Service Status"
+msgstr ""
+
+msgid "Running (Hardware Active)"
+msgstr ""
+
+msgid "Stopped (Disabled / Inactive)"
+msgstr ""
+
+msgid "Hardware Acceleration Engine"
+msgstr ""
+
+msgid "mtkhnat driver not detected"
+msgstr ""
+
+msgid "Available QDMA Hardware Queues"
+msgstr ""
+
+msgid "hardware TX queues"
+msgstr ""
+
+msgid "Collecting data..."
+msgstr ""
+
+msgid "Global Bandwidth Settings"
+msgstr ""
+
+msgid "Enable MTK Hardware QoS"
+msgstr ""
+
+msgid "Global Download Bandwidth (Mbit/s) [Optional]"
+msgstr ""
+
+msgid "Leave empty for unconstrained line-rate (recommended). Set only if you need to limit total WAN throughput or mitigate Bufferbloat."
+msgstr ""
+
+msgid "Unlimited"
+msgstr ""
+
+msgid "Global Upload Bandwidth (Mbit/s) [Optional]"
+msgstr ""
+
+msgid "Leave empty for unconstrained line-rate (recommended)."
+msgstr ""
+
+msgid "QDMA Scheduling Policy"
+msgstr ""
+
+msgid "Hardware queue scheduling algorithm. WRR is recommended for most traffic shaping scenarios."
+msgstr ""
+
+msgid "Weighted Round Robin (WRR)"
+msgstr ""
+
+msgid "Strict Priority (SP)"
+msgstr ""
+
+msgid "IP / MAC Bandwidth Limits"
+msgstr ""
+
+msgid "Allocate independent QDMA hardware queues for specific LAN devices to accurately throttle IPv4 and IPv6 traffic while maintaining hardware NAT acceleration."
+msgstr ""
+
+msgid "Enabled"
+msgstr ""
+
+msgid "Match Type"
+msgstr ""
+
+msgid "IP Address (IPv4 / IPv6)"
+msgstr ""
+
+msgid "MAC Address"
+msgstr ""
+
+msgid "IP Address"
+msgstr ""
+
+msgid "Download Limit (Mbit/s)"
+msgstr ""
+
+msgid "Upload Limit (Mbit/s)"
+msgstr ""
+
+msgid "Description"
+msgstr ""
+
+msgid "e.g. Office PC / Phone"
+msgstr ""
+
+msgid "Active Rate Limited Targets & IP Bindings"
+msgstr ""
+
+msgid "Hardware NAT flow table bindings and allocated queue mappings."
+msgstr ""
+
+msgid "Target"
+msgstr ""
+
+msgid "IPv4 Address"
+msgstr ""
+
+msgid "Associated IPv6 Address(es)"
+msgstr ""
+
+msgid "Download Queue / Rate"
+msgstr ""
+
+msgid "Upload Queue / Rate"
+msgstr ""
+
+msgid "None"
+msgstr ""
+
+msgid "Download"
+msgstr ""
+
+msgid "Upload"
+msgstr ""
+
+msgid "No active rate limited devices."
+msgstr ""
+
+msgid "Active Hardware Queue Monitor (QDMA TX Queues)"
+msgstr ""
+
+msgid "Real-time packet counters and rate limiting status on MediaTek network hardware queues."
+msgstr ""
+
+msgid "Queue ID"
+msgstr ""
+
+msgid "Queue Role / Target"
+msgstr ""
+
+msgid "Rate Limit"
+msgstr ""
+
+msgid "Transmitted Packets"
+msgstr ""
+
+msgid "Transmitted Bytes"
+msgstr ""
+
+msgid "Hardware Drops"
+msgstr ""
+
+msgid "Default Queue (Unshaped)"
+msgstr ""
+
+msgid "Unlimited (Line-rate)"
+msgstr ""
+
+msgid "No active queue statistics available."
+msgstr ""
+
+msgid "Service is stopped."
+msgstr ""

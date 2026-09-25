@@ -1,0 +1,7 @@
+#!/bin/sh
+# SPDX-License-Identifier: GPL-2.0-only
+# DHCP hotplug trigger for MediaTek Hardware QoS (HQoS)
+
+[ "$ACTION" = "add" ] || [ "$ACTION" = "update" ] || exit 0
+
+/usr/sbin/mtk-hqos refresh >/dev/null 2>&1 &

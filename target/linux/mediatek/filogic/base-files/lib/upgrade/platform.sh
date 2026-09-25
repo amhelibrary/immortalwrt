@@ -1,5 +1,5 @@
 REQUIRE_IMAGE_METADATA=1
-RAMFS_COPY_BIN='fitblk fit_check_sign'
+RAMFS_COPY_BIN='fitblk blkid bspconf dmsetup fit_check_sign'
 
 asus_initial_setup()
 {
@@ -99,20 +99,82 @@ platform_do_upgrade() {
 	local board=$(board_name)
 
 	case "$board" in
+	mediatek,mt7981-rfb|\
+	mediatek,mt7986a-rfb|\
+	mediatek,mt7986a-rfb-snand|\
+	mediatek,mt7986a-rfb-snor|\
+	mediatek,mt7986b-rfb|\
+	mediatek,mt7987a|\
+	mediatek,mt7988a-rfb|\
+	mediatek,mt7988a-rfb-gsw|\
+	mediatek,mt7988d-rfb|\
+	mediatek,mt7988d-rfb-gsw)
+		[ -e /dev/dm-0 ] && dmsetup remove_all
+		[ -e /dev/fit0 ] && fitblk /dev/fit0
+		[ -e /dev/fitrw ] && fitblk /dev/fitrw
+		export_fitblk_bootdev
+		case "$CI_METHOD" in
+		emmc)
+			mmc_do_upgrade "$1"
+			;;
+		default)
+			default_do_upgrade "$1"
+			;;
+		ubi)
+			CI_KERNPART="firmware"
+			ubi_do_upgrade "$1"
+			;;
+		*)
+			if grep \"rootfs_data\" /proc/mtd; then
+				default_do_upgrade "$1"
+			fi
+			;;
+		esac
+		;;
+	bananapi,bpi-r4|\
+	bananapi,bpi-r4-2g5|\
+	bananapi,bpi-r4-poe|\
+	bananapi,bpi-r4-pro|\
+	bananapi,bpi-r4-pro-8x|\
+	bananapi,bpi-r4-lite)
+		[ -e /dev/dm-0 ] && dmsetup remove_all
+		[ -e /dev/fit0 ] && fitblk /dev/fit0
+		[ -e /dev/fitrw ] && fitblk /dev/fitrw
+		for fitdev in /dev/fit*; do
+			[ -e "$fitdev" ] && fitblk "$fitdev" 2>/dev/null
+		done
+		export_fitblk_bootdev
+		if [ -z "$CI_METHOD" ]; then
+			local mmc_part="$(find_mmc_part "firmware")"
+			[ -z "$mmc_part" ] && mmc_part="$(find_mmc_part "production")"
+			if [ -n "$mmc_part" ]; then
+				export EMMC_KERN_DEV="$mmc_part"
+				export CI_METHOD="emmc"
+			fi
+		fi
+		case "$CI_METHOD" in
+		emmc)
+			emmc_do_upgrade "$1"
+			;;
+		ubi)
+			nand_do_upgrade "$1"
+			;;
+		default)
+			default_do_upgrade "$1"
+			;;
+		*)
+			fit_do_upgrade "$1"
+			;;
+		esac
+		;;
 	abt,asr3000|\
 	acer,predator-w6x-ubootmod|\
 	asus,zenwifi-bt8-ubootmod|\
 	bananapi,bpi-r3|\
 	bananapi,bpi-r3-mini|\
-	bananapi,bpi-r4|\
-	bananapi,bpi-r4-2g5|\
-	bananapi,bpi-r4-poe|\
-	bananapi,bpi-r4-lite|\
 	bazis,ax3000wm|\
-	cetron,ct3003-ubootmod|\
 	cmcc,a10-ubootmod|\
 	cmcc,rax3000m|\
-	cmcc,rax3000me|\
 	comfast,cf-wr632ax-ubootmod|\
 	creatlentem,clt-r30b1-ubi|\
 	cudy,m3000-v1-ubootmod|\
@@ -130,9 +192,6 @@ platform_do_upgrade() {
 	jcg,q30-pro|\
 	jdcloud,re-cp-03|\
 	konka,komi-a31|\
-	livinet,zr-3020-ubootmod|\
-	mediatek,mt7981-rfb|\
-	mediatek,mt7988a-rfb|\
 	mercusys,mr90x-v1-ubi|\
 	netis,eap930-v1|\
 	netis,n6-v2|\
@@ -149,9 +208,6 @@ platform_do_upgrade() {
 	routerich,be7200|\
 	snr,snr-cpe-ax2|\
 	teralink,tl3020-256mb|\
-	tplink,tl-7dr7230-v1|\
-	tplink,tl-7dr7230-v2|\
-	tplink,tl-7dr7250-v1|\
 	tplink,tl-xdr4288|\
 	tplink,tl-xdr6086|\
 	tplink,tl-xdr6088|\
@@ -175,7 +231,7 @@ platform_do_upgrade() {
 	glinet,gl-x3000|\
 	glinet,gl-xe3000|\
 	hiveton,h5000m|\
-	huasifei,wh3000-emmc|\
+	huasifei,wh3000|\
 	huasifei,wh3000-pro-emmc|\
 	smartrg,sdg-8612|\
 	smartrg,sdg-8614|\
@@ -187,6 +243,33 @@ platform_do_upgrade() {
 		CI_KERNPART="kernel"
 		CI_ROOTPART="rootfs"
 		emmc_do_upgrade "$1"
+		;;
+	airtel,aap4221zy)
+		# ZyXEL zloader requires a "zyfwinfo" UBI volume with valid
+		# metadata (magic + checksum) to select the boot partition.
+		# Without it, zloader refuses to boot the firmware. It has to be
+		# written before nand_do_upgrade(), which sizes rootfs_data to
+		# fill the remaining space.
+		local ubidev="$(nand_attach_ubi "${CI_UBIPART:-ubi}")"
+		[ "$ubidev" ] || nand_do_upgrade_failed
+		local vol="$(nand_find_volume "$ubidev" zyfwinfo)"
+		if [ ! "$vol" ]; then
+			# rootfs_data may occupy all LEBs, nand_do_upgrade() recreates it
+			[ "$(nand_find_volume "$ubidev" rootfs_data)" ] && \
+				ubirmvol /dev/$ubidev -N rootfs_data
+			if ! ubimkvol /dev/$ubidev -N zyfwinfo -s 256 -t dynamic; then
+				echo "cannot create zyfwinfo volume"
+				nand_do_upgrade_failed
+			fi
+			vol="$(nand_find_volume "$ubidev" zyfwinfo)"
+		fi
+		local tmpfile="/tmp/zyfwinfo.bin"
+		echo -n -e '\x45\x58\x59\x5A\x02\x00\xB3\x15\x00\x01\x00\x00' > "$tmpfile"
+		dd if=/dev/zero bs=1 count=242 >> "$tmpfile" 2>/dev/null
+		echo -n -e '\x1B\x02' >> "$tmpfile"
+		ubiupdatevol /dev/$vol -s 256 "$tmpfile"
+		rm -f "$tmpfile"
+		nand_do_upgrade "$1"
 		;;
 	asus,rt-ax52|\
 	asus,rt-ax57m|\
@@ -311,6 +394,10 @@ platform_do_upgrade() {
 	esac
 }
 
+fit_verify_image() {
+	return 0
+}
+
 PART_NAME=firmware
 
 platform_check_image() {
@@ -327,12 +414,12 @@ platform_check_image() {
 	bananapi,bpi-r4|\
 	bananapi,bpi-r4-2g5|\
 	bananapi,bpi-r4-poe|\
+	bananapi,bpi-r4-pro|\
+	bananapi,bpi-r4-pro-8x|\
 	bananapi,bpi-r4-lite|\
 	bazis,ax3000wm|\
-	cetron,ct3003-ubootmod|\
 	cmcc,a10-ubootmod|\
 	cmcc,rax3000m|\
-	cmcc,rax3000me|\
 	comfast,cf-wr632ax-ubootmod|\
 	creatlentem,clt-r30b1-ubi|\
 	cudy,m3000-v1-ubootmod|\
@@ -346,13 +433,19 @@ platform_check_image() {
 	gatonetworks,gdsp|\
 	globitel,bt-r320|\
 	h3c,magic-nx30-pro|\
-	imou,lc-hx3001|\
 	jcg,q30-pro|\
 	jdcloud,re-cp-03|\
 	konka,komi-a31|\
-	livinet,zr-3020-ubootmod|\
 	mediatek,mt7981-rfb|\
+	mediatek,mt7986a-rfb|\
+	mediatek,mt7986a-rfb-snand|\
+	mediatek,mt7986a-rfb-snor|\
+	mediatek,mt7986b-rfb|\
+	mediatek,mt7987a|\
 	mediatek,mt7988a-rfb|\
+	mediatek,mt7988a-rfb-gsw|\
+	mediatek,mt7988d-rfb|\
+	mediatek,mt7988d-rfb-gsw|\
 	mercusys,mr90x-v1-ubi|\
 	nokia,ea0326gmp|\
 	netis,eap930-v1|\
@@ -360,14 +453,10 @@ platform_check_image() {
 	netis,nx32u|\
 	openwrt,one|\
 	netcore,n60|\
-	netcore,n60-pro|\
 	qihoo,360t7|\
 	qihoo,360t7-ubi|\
 	routerich,ax3000-ubootmod|\
 	teralink,tl3020-256mb|\
-	tplink,tl-7dr7230-v1|\
-	tplink,tl-7dr7230-v2|\
-	tplink,tl-7dr7250-v1|\
 	tplink,tl-xdr4288|\
 	tplink,tl-xdr6086|\
 	tplink,tl-xdr6088|\
@@ -377,6 +466,7 @@ platform_check_image() {
 	xiaomi,redmi-router-ax6000-ubootmod|\
 	xiaomi,mi-router-wr30u-ubootmod|\
 	zyxel,ex5601-t0-ubootmod)
+		fit_verify_image "$1" || return 74
 		fit_check_image "$1"
 		return $?
 		;;
@@ -405,6 +495,38 @@ platform_check_image() {
 
 platform_copy_config() {
 	case "$(board_name)" in
+	bananapi,bpi-r3|\
+	bananapi,bpi-r3-mini|\
+	bananapi,bpi-r4|\
+	bananapi,bpi-r4-2g5|\
+	bananapi,bpi-r4-poe|\
+	bananapi,bpi-r4-pro|\
+	bananapi,bpi-r4-pro-8x|\
+	bananapi,bpi-r4-lite|\
+	cmcc,rax3000m|\
+	gatonetworks,gdsp|\
+	mediatek,mt7981-rfb|\
+	mediatek,mt7986a-rfb|\
+	mediatek,mt7986a-rfb-snand|\
+	mediatek,mt7986a-rfb-snor|\
+	mediatek,mt7986b-rfb|\
+	mediatek,mt7987a|\
+	mediatek,mt7988a-rfb|\
+	mediatek,mt7988a-rfb-gsw|\
+	mediatek,mt7988d-rfb|\
+	mediatek,mt7988d-rfb-gsw)
+		if [ -z "$CI_METHOD" ]; then
+			local mmc_part="$(find_mmc_part "firmware")"
+			[ -z "$mmc_part" ] && mmc_part="$(find_mmc_part "production")"
+			if [ -n "$mmc_part" ]; then
+				[ -z "$EMMC_KERN_DEV" ] && export EMMC_KERN_DEV="$mmc_part"
+				export CI_METHOD="emmc"
+			fi
+		fi
+		if [ "$CI_METHOD" = "emmc" ]; then
+			emmc_copy_config
+		fi
+		;;
 	acer,predator-w6|\
 	acer,predator-w6d|\
 	acer,vero-w6m|\
@@ -417,7 +539,7 @@ platform_copy_config() {
 	glinet,gl-xe3000|\
 	globitel,bt-r320|\
 	hiveton,h5000m|\
-	huasifei,wh3000-emmc|\
+	huasifei,wh3000|\
 	huasifei,wh3000-pro-emmc|\
 	jdcloud,re-cp-03|\
 	nradio,c8-668gl|\
@@ -430,20 +552,6 @@ platform_copy_config() {
 	smartrg,sdg-8734|\
 	ubnt,unifi-6-plus)
 		emmc_copy_config
-		;;
-	bananapi,bpi-r3|\
-	bananapi,bpi-r3-mini|\
-	bananapi,bpi-r4|\
-	bananapi,bpi-r4-2g5|\
-	bananapi,bpi-r4-poe|\
-	bananapi,bpi-r4-lite|\
-	cmcc,rax3000m|\
-	cmcc,rax3000me|\
-	gatonetworks,gdsp|\
-	mediatek,mt7988a-rfb)
-		if [ "$CI_METHOD" = "emmc" ]; then
-			emmc_copy_config
-		fi
 		;;
 	esac
 }

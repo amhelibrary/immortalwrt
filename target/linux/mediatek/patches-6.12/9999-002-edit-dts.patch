@@ -1,0 +1,40 @@
+--- a/arch/arm64/boot/dts/mediatek/mt7988a-bananapi-bpi-r4-emmc.dtso
++++ b/arch/arm64/boot/dts/mediatek/mt7988a-bananapi-bpi-r4-emmc.dtso
+@@ -38,14 +38,14 @@
+ 			compatible = "gpt-partitions";
+
+ 			block-partition-env {
+-				partname = "ubootenv";
++				partname = "u-boot-env";
+ 				nvmem-layout {
+ 					compatible = "u-boot,env-layout";
+ 				};
+ 			};
+
+-			emmc_rootfs: block-partition-production {
+-				partname = "production";
++			emmc_rootfs: block-partition-firmware {
++				partname = "firmware";
+ 			};
+ 		};
+ 	};
+--- a/arch/arm64/boot/dts/mediatek/mt7988a-bananapi-bpi-r4-sd.dtso
++++ b/arch/arm64/boot/dts/mediatek/mt7988a-bananapi-bpi-r4-sd.dtso
+@@ -36,14 +36,14 @@
+ 			compatible = "gpt-partitions";
+
+ 			block-partition-env {
+-				partname = "ubootenv";
++				partname = "u-boot-env";
+ 				nvmem-layout {
+ 					compatible = "u-boot,env-layout";
+ 				};
+ 			};
+
+-			sd_rootfs: block-partition-production {
+-				partname = "production";
++			sd_rootfs: block-partition-firmware {
++				partname = "firmware";
+ 			};
+ 		};
+ 	};
