@@ -284,6 +284,12 @@ start_hqos() {
 		fi
 	fi
 
+	local lan_iface=""
+	if command -v uci >/dev/null 2>&1; then
+		lan_iface=$(uci get network.lan.device 2>/dev/null || uci get network.lan.ifname 2>/dev/null || echo "br-lan")
+	fi
+	[ -z "$lan_iface" ] && lan_iface="br-lan"
+
 	local cur_qid=1
 
 	# Initialize JSON state storage
@@ -293,6 +299,7 @@ start_hqos() {
 	parse_device_rule() {
 		local cfg="$1"
 		local dev_enabled type ip mac download upload comment
+		local proto port port_dir
 		config_get_bool dev_enabled "$cfg" "enabled" "1"
 		[ "$dev_enabled" -eq 1 ] || return 0
 
@@ -302,6 +309,9 @@ start_hqos() {
 		config_get download "$cfg" "download" ""
 		config_get upload "$cfg" "upload" ""
 		config_get comment "$cfg" "comment" ""
+		config_get proto "$cfg" "proto" "both"
+		config_get port "$cfg" "port" ""
+		config_get port_dir "$cfg" "port_dir" "any"
 
 		local target_ip4=""
 		local ip6_list=""
@@ -329,9 +339,34 @@ start_hqos() {
 				mac=$(get_mac_by_ip "$ip")
 				[ -n "$mac" ] && ip6_list=$(get_ip6_by_mac "$mac")
 			fi
+		elif [ "$type" = "port" ]; then
+			port=$(echo "$port" | tr -d ' ')
+			[ -z "$port" ] && return 0
+
+			if [ -n "$ip" ]; then
+				if echo "$ip" | grep -q ':'; then
+					ip6_list="$ip"
+					mac=$(get_mac_by_ip6 "$ip")
+					if [ -n "$mac" ]; then
+						target_ip4=$(get_ip_by_mac "$mac")
+						local other_ip6=$(get_ip6_by_mac "$mac")
+						for item in $other_ip6; do
+							case " $ip6_list " in *" $item "*) ;; *) ip6_list="$ip6_list $item" ;; esac
+						done
+					fi
+				else
+					target_ip4="$ip"
+					mac=$(get_mac_by_ip "$ip")
+					[ -n "$mac" ] && ip6_list=$(get_ip6_by_mac "$mac")
+				fi
+			fi
 		fi
 
-		[ -z "$target_ip4" ] && [ -z "$ip6_list" ] && [ -z "$mac" ] && return 0
+		if [ "$type" = "port" ]; then
+			[ -z "$port" ] && return 0
+		else
+			[ -z "$target_ip4" ] && [ -z "$ip6_list" ] && [ -z "$mac" ] && return 0
+		fi
 
 		local dl_qid=0
 		local up_qid=0
@@ -379,7 +414,132 @@ start_hqos() {
 		fi
 
 		# Apply firewall marking rules
-		if [ "$USE_NFT" -eq 1 ]; then
+		if [ "$type" = "port" ]; then
+			if [ "$USE_NFT" -eq 1 ]; then
+				local nft_proto_expr=""
+				case "$proto" in
+					tcp) nft_proto_expr="meta l4proto tcp " ;;
+					udp) nft_proto_expr="meta l4proto udp " ;;
+					*)   nft_proto_expr="meta l4proto { tcp, udp } " ;;
+				esac
+
+				local clean_port_nft=$(echo "$port" | tr -d ' ' | tr ':' '-')
+				local nft_port_expr
+				if echo "$clean_port_nft" | grep -q '[, -]'; then
+					nft_port_expr="{ $(echo "$clean_port_nft" | sed 's/,/, /g') }"
+				else
+					nft_port_expr="$clean_port_nft"
+				fi
+
+				add_nft_port_up() {
+					local ip_expr="$1"
+					if [ "$port_dir" = "client" ] || [ "$port_dir" = "any" ]; then
+						nft add rule inet mtk_hqos prerouting ${ip_expr}${nft_proto_expr}th dport ${nft_port_expr} meta mark set "$up_mark_hex" ct mark set "(ct mark and 0x0000ffff) or ${up_ctmark_hex}" 2>/dev/null
+					fi
+					if [ "$port_dir" = "server" ] || [ "$port_dir" = "any" ]; then
+						local if_expr=""
+						[ -z "$ip_expr" ] && [ -n "$lan_iface" ] && if_expr="iifname \"$lan_iface\" "
+						nft add rule inet mtk_hqos prerouting ${if_expr}${ip_expr}${nft_proto_expr}th sport ${nft_port_expr} meta mark set "$up_mark_hex" ct mark set "(ct mark and 0x0000ffff) or ${up_ctmark_hex}" 2>/dev/null
+					fi
+				}
+
+				add_nft_port_down() {
+					local ip_expr="$1"
+					if [ "$port_dir" = "client" ] || [ "$port_dir" = "any" ]; then
+						nft add rule inet mtk_hqos forward ${ip_expr}${nft_proto_expr}th sport ${nft_port_expr} meta mark set "$dl_mark_hex" ct mark set "(ct mark and 0xffff0000) or ${dl_ctmark_hex}" 2>/dev/null
+						nft add rule inet mtk_hqos postrouting ${ip_expr}${nft_proto_expr}th sport ${nft_port_expr} meta mark set "$dl_mark_hex" 2>/dev/null
+					fi
+					if [ "$port_dir" = "server" ] || [ "$port_dir" = "any" ]; then
+						nft add rule inet mtk_hqos forward ${ip_expr}${nft_proto_expr}th dport ${nft_port_expr} meta mark set "$dl_mark_hex" ct mark set "(ct mark and 0xffff0000) or ${dl_ctmark_hex}" 2>/dev/null
+						nft add rule inet mtk_hqos postrouting ${ip_expr}${nft_proto_expr}th dport ${nft_port_expr} meta mark set "$dl_mark_hex" 2>/dev/null
+					fi
+				}
+
+				if [ "$up_qid" -gt 0 ]; then
+					[ -n "$target_ip4" ] && add_nft_port_up "ip saddr $target_ip4 "
+					for ip6 in $ip6_list; do
+						add_nft_port_up "ip6 saddr $ip6 "
+					done
+					[ -z "$target_ip4" ] && [ -z "$ip6_list" ] && add_nft_port_up ""
+				fi
+
+				if [ "$dl_qid" -gt 0 ]; then
+					[ -n "$target_ip4" ] && add_nft_port_down "ip daddr $target_ip4 "
+					for ip6 in $ip6_list; do
+						add_nft_port_down "ip6 daddr $ip6 "
+					done
+					[ -z "$target_ip4" ] && [ -z "$ip6_list" ] && add_nft_port_down ""
+				fi
+			else
+				# IPTables & IP6Tables Fallback for Port
+				local clean_port_ipt=$(echo "$port" | tr -d ' ' | tr '-' ':')
+				local ipt_protos="tcp udp"
+				[ "$proto" = "tcp" ] && ipt_protos="tcp"
+				[ "$proto" = "udp" ] && ipt_protos="udp"
+				local up_ctmark_val=$(( (0x8000 | up_qid) << 16 ))
+				local dl_ctmark_val=$(( 0x8000 | dl_qid ))
+
+				add_ipt_port_up() {
+					local ipt_cmd="$1"
+					local s_arg="$2"
+					for p in $ipt_protos; do
+						if [ "$port_dir" = "client" ] || [ "$port_dir" = "any" ]; then
+							$ipt_cmd -t mangle -A MTK_HQOS_PRE $s_arg -p "$p" -m multiport --dports "$clean_port_ipt" -j MARK --set-mark "$up_qid" 2>/dev/null
+							$ipt_cmd -t mangle -A MTK_HQOS_PRE $s_arg -p "$p" -m multiport --dports "$clean_port_ipt" -j CONNMARK --set-mark "${up_ctmark_val}/0xffff0000" 2>/dev/null
+						fi
+						if [ "$port_dir" = "server" ] || [ "$port_dir" = "any" ]; then
+							local if_arg=""
+							[ -z "$s_arg" ] && [ -n "$lan_iface" ] && if_arg="-i $lan_iface"
+							$ipt_cmd -t mangle -A MTK_HQOS_PRE $if_arg $s_arg -p "$p" -m multiport --sports "$clean_port_ipt" -j MARK --set-mark "$up_qid" 2>/dev/null
+							$ipt_cmd -t mangle -A MTK_HQOS_PRE $if_arg $s_arg -p "$p" -m multiport --sports "$clean_port_ipt" -j CONNMARK --set-mark "${up_ctmark_val}/0xffff0000" 2>/dev/null
+						fi
+					done
+				}
+
+				add_ipt_port_down() {
+					local ipt_cmd="$1"
+					local d_arg="$2"
+					for p in $ipt_protos; do
+						if [ "$port_dir" = "client" ] || [ "$port_dir" = "any" ]; then
+							$ipt_cmd -t mangle -A MTK_HQOS_FWD $d_arg -p "$p" -m multiport --sports "$clean_port_ipt" -j MARK --set-mark "$dl_qid" 2>/dev/null
+							$ipt_cmd -t mangle -A MTK_HQOS_FWD $d_arg -p "$p" -m multiport --sports "$clean_port_ipt" -j CONNMARK --set-mark "${dl_ctmark_val}/0x0000ffff" 2>/dev/null
+							$ipt_cmd -t mangle -A MTK_HQOS_POST $d_arg -p "$p" -m multiport --sports "$clean_port_ipt" -j MARK --set-mark "$dl_qid" 2>/dev/null
+						fi
+						if [ "$port_dir" = "server" ] || [ "$port_dir" = "any" ]; then
+							$ipt_cmd -t mangle -A MTK_HQOS_FWD $d_arg -p "$p" -m multiport --dports "$clean_port_ipt" -j MARK --set-mark "$dl_qid" 2>/dev/null
+							$ipt_cmd -t mangle -A MTK_HQOS_FWD $d_arg -p "$p" -m multiport --dports "$clean_port_ipt" -j CONNMARK --set-mark "${dl_ctmark_val}/0x0000ffff" 2>/dev/null
+							$ipt_cmd -t mangle -A MTK_HQOS_POST $d_arg -p "$p" -m multiport --dports "$clean_port_ipt" -j MARK --set-mark "$dl_qid" 2>/dev/null
+						fi
+					done
+				}
+
+				if [ "$up_qid" -gt 0 ]; then
+					[ -n "$target_ip4" ] && add_ipt_port_up "iptables" "-s $target_ip4"
+					if command -v ip6tables >/dev/null 2>&1; then
+						for ip6 in $ip6_list; do
+							add_ipt_port_up "ip6tables" "-s $ip6"
+						done
+					fi
+					if [ -z "$target_ip4" ] && [ -z "$ip6_list" ]; then
+						add_ipt_port_up "iptables" ""
+						command -v ip6tables >/dev/null 2>&1 && add_ipt_port_up "ip6tables" ""
+					fi
+				fi
+
+				if [ "$dl_qid" -gt 0 ]; then
+					[ -n "$target_ip4" ] && add_ipt_port_down "iptables" "-d $target_ip4"
+					if command -v ip6tables >/dev/null 2>&1; then
+						for ip6 in $ip6_list; do
+							add_ipt_port_down "ip6tables" "-d $ip6"
+						done
+					fi
+					if [ -z "$target_ip4" ] && [ -z "$ip6_list" ]; then
+						add_ipt_port_down "iptables" ""
+						command -v ip6tables >/dev/null 2>&1 && add_ipt_port_down "ip6tables" ""
+					fi
+				fi
+			fi
+		elif [ "$USE_NFT" -eq 1 ]; then
 			# Uplink rules (traffic from this specific device)
 			if [ "$up_qid" -gt 0 ]; then
 				# Match by MAC
@@ -467,8 +627,21 @@ start_hqos() {
 		[ -n "$target_ip4" ] && echo -n "9 $target_ip4" > /sys/kernel/debug/hnat/hnat_entry 2>/dev/null || true
 
 		# Record state
-		local target_label="${target_ip4:-$mac}"
-		[ -z "$target_label" ] && target_label="$(echo "$ip6_list" | awk '{print $1}')"
+		local target_label
+		if [ "$type" = "port" ]; then
+			local proto_str="$(echo "$proto" | tr 'a-z' 'A-Z')"
+			[ "$proto" = "both" ] && proto_str="TCP/UDP"
+			if [ -n "$target_ip4" ]; then
+				target_label="[Port ${port} ${proto_str}] ${target_ip4}"
+			elif [ -n "$ip6_list" ]; then
+				target_label="[Port ${port} ${proto_str}] $(echo "$ip6_list" | awk '{print $1}')"
+			else
+				target_label="[Port ${port} ${proto_str}] (All LAN)"
+			fi
+		else
+			target_label="${target_ip4:-$mac}"
+			[ -z "$target_label" ] && target_label="$(echo "$ip6_list" | awk '{print $1}')"
+		fi
 		[ -n "$comment" ] && target_label="${target_label} (${comment})"
 
 		if [ "$first_entry" -eq 1 ]; then
@@ -479,7 +652,11 @@ start_hqos() {
 
 		cat <<EOF >> "$STATE_FILE"
     {
+      "type": "${type}",
       "target": "${target_label}",
+      "proto": "${proto}",
+      "port": "${port}",
+      "port_dir": "${port_dir}",
       "ip": "${target_ip4}",
       "ip6_list": "${ip6_list}",
       "mac": "${mac}",

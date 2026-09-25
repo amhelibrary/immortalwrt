@@ -80,11 +80,11 @@ msgstr "加權輪詢 (WRR - Weighted Round Robin)"
 msgid "Strict Priority (SP)"
 msgstr "嚴格優先級 (SP - Strict Priority)"
 
-msgid "IP / MAC Bandwidth Limits"
-msgstr "基於 IP / MAC 位址限速"
+msgid "Bandwidth Control Rules (IP / MAC / Port)"
+msgstr "基於 IP / MAC / 埠限速規則"
 
-msgid "Allocate independent QDMA hardware queues for specific LAN devices to accurately throttle IPv4 and IPv6 traffic while maintaining hardware NAT acceleration."
-msgstr "為區域網路指定裝置分配獨立的 QDMA 硬體限速隊列，在維持硬體加速的同時精準限制 IPv4 與 IPv6 速率。"
+msgid "Allocate independent QDMA hardware queues for specific LAN devices or protocol ports to accurately throttle IPv4, IPv6, and TCP/UDP traffic while maintaining hardware NAT acceleration."
+msgstr "為區域網路指定裝置或協定埠分配獨立的 QDMA 硬體限速隊列，在維持硬體加速的同時精準限制 IPv4、IPv6 與 TCP/UDP 流量。"
 
 msgid "Enabled"
 msgstr "啟用"
@@ -98,8 +98,32 @@ msgstr "IP 位址 (支援 IPv4 / IPv6)"
 msgid "MAC Address"
 msgstr "MAC 位址"
 
+msgid "Protocol Port (TCP / UDP)"
+msgstr "協定埠 (TCP / UDP)"
+
+msgid "Protocol"
+msgstr "協定"
+
+msgid "Port / Range"
+msgstr "埠 / 埠範圍"
+
+msgid "Port Direction"
+msgstr "埠方向"
+
+msgid "Any / Bidirectional (Recommended)"
+msgstr "任意 / 雙向 (推薦)"
+
+msgid "Client Outbound (Remote Server Port)"
+msgstr "用戶端對外存取 (遠端伺服器埠)"
+
+msgid "Server Inbound (Local Service Port)"
+msgstr "本機服務接收 (本機服務埠)"
+
 msgid "IP Address"
 msgstr "IP 位址"
+
+msgid "192.168.1.100 (Optional for Port)"
+msgstr "192.168.1.100 (依埠限速時可選填)"
 
 msgid "Download Limit (Mbit/s)"
 msgstr "下載限速 (Mbit/s)"
@@ -108,22 +132,25 @@ msgid "Upload Limit (Mbit/s)"
 msgstr "上傳限速 (Mbit/s)"
 
 msgid "Description"
-msgstr "裝置備註"
+msgstr "規則備註"
 
-msgid "e.g. Office PC / Phone"
-msgstr "例如：桌上型電腦 / 手機"
+msgid "e.g. Office PC / Web / Gaming"
+msgstr "例如：辦公電腦 / 網頁瀏覽 / 遊戲埠"
 
 msgid "Active Rate Limited Targets & IP Bindings"
-msgstr "目前生效裝置限速與 IP 綁定"
+msgstr "目前生效目標限速與 IP 綁定"
 
 msgid "Hardware NAT flow table bindings and allocated queue mappings."
 msgstr "硬體 NAT 流表綁定與已分配隊列映射關係。"
 
 msgid "Target"
-msgstr "目標裝置"
+msgstr "目標"
 
 msgid "IPv4 Address"
 msgstr "IPv4 位址"
+
+msgid "All LAN"
+msgstr "所有區域網路裝置"
 
 msgid "Associated IPv6 Address(es)"
 msgstr "關聯 IPv6 位址"
@@ -143,8 +170,8 @@ msgstr "下載"
 msgid "Upload"
 msgstr "上傳"
 
-msgid "No active rate limited devices."
-msgstr "目前未偵測到生效限速裝置（請在下方規則中設定並啟用）。"
+msgid "No active rate limited targets."
+msgstr "目前未偵測到生效限速目標（請在下方規則中設定並啟用）。"
 
 msgid "Active Hardware Queue Monitor (QDMA TX Queues)"
 msgstr "活躍硬體隊列即時監控 (QDMA TX Queues)"

@@ -72,8 +72,8 @@ return view.extend({
 		o.default = 'wrr';
 
 		// 3. Device Rules Configuration
-		s = m.section(form.TableSection, 'device', _('IP / MAC Bandwidth Limits'),
-			_('Allocate independent QDMA hardware queues for specific LAN devices to accurately throttle IPv4 and IPv6 traffic while maintaining hardware NAT acceleration.'));
+		s = m.section(form.TableSection, 'device', _('Bandwidth Control Rules (IP / MAC / Port)'),
+			_('Allocate independent QDMA hardware queues for specific LAN devices or protocol ports to accurately throttle IPv4, IPv6, and TCP/UDP traffic while maintaining hardware NAT acceleration.'));
 		s.addremove = true;
 		s.anonymous = true;
 		s.sortable = true;
@@ -85,12 +85,33 @@ return view.extend({
 		o = s.option(form.ListValue, 'type', _('Match Type'));
 		o.value('ip', _('IP Address (IPv4 / IPv6)'));
 		o.value('mac', _('MAC Address'));
+		o.value('port', _('Protocol Port (TCP / UDP)'));
 		o.default = 'ip';
+
+		o = s.option(form.ListValue, 'proto', _('Protocol'));
+		o.value('both', 'TCP + UDP');
+		o.value('tcp', 'TCP');
+		o.value('udp', 'UDP');
+		o.default = 'both';
+		o.depends('type', 'port');
+
+		o = s.option(form.Value, 'port', _('Port / Range'));
+		o.placeholder = '80,443 / 5000-6000';
+		o.depends('type', 'port');
+
+		o = s.option(form.ListValue, 'port_dir', _('Port Direction'));
+		o.value('any', _('Any / Bidirectional (Recommended)'));
+		o.value('client', _('Client Outbound (Remote Server Port)'));
+		o.value('server', _('Server Inbound (Local Service Port)'));
+		o.default = 'any';
+		o.depends('type', 'port');
 
 		o = s.option(form.Value, 'ip', _('IP Address'));
 		o.datatype = 'or(ip4addr, ip6addr, cidr4, cidr6)';
-		o.placeholder = '192.168.1.100 / 240e:...';
+		o.placeholder = '192.168.1.100 (Optional for Port)';
 		o.depends('type', 'ip');
+		o.depends('type', 'port');
+		o.rmempty = true;
 		if (hostHints.hosts) {
 			for (let mac in hostHints.hosts) {
 				const host = hostHints.hosts[mac];
@@ -135,7 +156,7 @@ return view.extend({
 		o.rmempty = true;
 
 		o = s.option(form.Value, 'comment', _('Description'));
-		o.placeholder = _('e.g. Office PC / Phone');
+		o.placeholder = _('e.g. Office PC / Web / Gaming');
 
 		// 4. Active Targets & Bindings (Always present in DOM)
 		s = m.section(form.NamedSection, '_active_devices');
@@ -155,7 +176,7 @@ return view.extend({
 							E('th', { 'class': 'th cbi-section-table-cell' }, _('Upload Queue / Rate'))
 						]),
 						E('tr', { 'class': 'tr placeholder' }, [
-							E('td', { 'class': 'td', 'colspan': 6 }, E('em', _('No active rate limited devices.')))
+							E('td', { 'class': 'td', 'colspan': 6 }, E('em', _('No active rate limited targets.')))
 						])
 					])
 				])
@@ -244,17 +265,19 @@ return view.extend({
 						ip6Node = E('span', { 'style': 'color:#888;' }, _('None'));
 					}
 
+					const ipDisplay = d.ip || (d.type === 'port' ? _('All LAN') : '-');
+
 					devRows.push([
 						E('b', {}, d.target || '-'),
 						E('code', {}, d.mac || '-'),
-						d.ip || '-',
+						ipDisplay,
 						ip6Node,
 						d.dl_qid > 0 ? ('Q' + d.dl_qid + ' (' + d.dl_mbps + ' Mbps)') : _('Unlimited'),
 						d.up_qid > 0 ? ('Q' + d.up_qid + ' (' + d.up_mbps + ' Mbps)') : _('Unlimited')
 					]);
 				}
 			}
-			cbi_update_table('#active_devices_table', devRows, _('No active rate limited devices.'));
+			cbi_update_table('#active_devices_table', devRows, _('No active rate limited targets.'));
 
 			// Update Queue Stats Table
 			const statRows = [];

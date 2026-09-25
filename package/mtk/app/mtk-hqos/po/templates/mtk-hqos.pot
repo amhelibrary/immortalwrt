@@ -76,10 +76,10 @@ msgstr ""
 msgid "Strict Priority (SP)"
 msgstr ""
 
-msgid "IP / MAC Bandwidth Limits"
+msgid "Bandwidth Control Rules (IP / MAC / Port)"
 msgstr ""
 
-msgid "Allocate independent QDMA hardware queues for specific LAN devices to accurately throttle IPv4 and IPv6 traffic while maintaining hardware NAT acceleration."
+msgid "Allocate independent QDMA hardware queues for specific LAN devices or protocol ports to accurately throttle IPv4, IPv6, and TCP/UDP traffic while maintaining hardware NAT acceleration."
 msgstr ""
 
 msgid "Enabled"
@@ -94,7 +94,31 @@ msgstr ""
 msgid "MAC Address"
 msgstr ""
 
+msgid "Protocol Port (TCP / UDP)"
+msgstr ""
+
+msgid "Protocol"
+msgstr ""
+
+msgid "Port / Range"
+msgstr ""
+
+msgid "Port Direction"
+msgstr ""
+
+msgid "Any / Bidirectional (Recommended)"
+msgstr ""
+
+msgid "Client Outbound (Remote Server Port)"
+msgstr ""
+
+msgid "Server Inbound (Local Service Port)"
+msgstr ""
+
 msgid "IP Address"
+msgstr ""
+
+msgid "192.168.1.100 (Optional for Port)"
 msgstr ""
 
 msgid "Download Limit (Mbit/s)"
@@ -106,7 +130,7 @@ msgstr ""
 msgid "Description"
 msgstr ""
 
-msgid "e.g. Office PC / Phone"
+msgid "e.g. Office PC / Web / Gaming"
 msgstr ""
 
 msgid "Active Rate Limited Targets & IP Bindings"
@@ -119,6 +143,9 @@ msgid "Target"
 msgstr ""
 
 msgid "IPv4 Address"
+msgstr ""
+
+msgid "All LAN"
 msgstr ""
 
 msgid "Associated IPv6 Address(es)"
@@ -139,7 +166,7 @@ msgstr ""
 msgid "Upload"
 msgstr ""
 
-msgid "No active rate limited devices."
+msgid "No active rate limited targets."
 msgstr ""
 
 msgid "Active Hardware Queue Monitor (QDMA TX Queues)"
