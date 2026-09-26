@@ -25,6 +25,9 @@ function wpad_update_mlo(service, mode)
 		if (data.mode != mode)
 			continue;
 
+		if (data.mld_setup == "driver")
+			continue;
+
 		data.phy = find_phy(data.radio_config[0], true);
 		if (!data.phy)
 			continue;
@@ -50,13 +53,15 @@ function supplicant_update_mlo()
 	wpad_update_mlo("wpa_supplicant", "sta");
 }
 
-function mlo_vif_create(config, radio_config, vif_idx, mlo_vifs)
+function mlo_vif_create(config, radio_config, vif_idx, mlo_vifs, mld_setup)
 {
 	let mlo_config = { ...config };
 
 	if (config.wds)
 		mlo_config['4addr'] = config.wds;
 	mlo_config.radio_config = radio_config;
+	if (mld_setup)
+		mlo_config.mld_setup = mld_setup;
 
 	let ifname = config.ifname;
 	if (!ifname) {
@@ -82,7 +87,72 @@ function mlo_vif_macaddr(config, dev_names, dev_name)
 		config.macaddr = macaddr;
 }
 
-function update_config(new_devices, mlo_vifs)
+function resolve_mlo_handler(devices, dev_names)
+{
+	if (!length(dev_names))
+		return;
+
+	let handler_name = devices[dev_names[0]]?.config.type;
+	let handler = wireless.handlers[handler_name];
+	if (!handler?.mlo)
+		return;
+
+	for (let dev_name in dev_names) {
+		let dev = devices[dev_name];
+		if (!dev || dev.config.type != handler_name)
+			return;
+	}
+
+	return handler;
+}
+
+// Admit the complete MLO interface before splitting it into radio payloads.
+function validate_mlo(devices, dev_names, mode, iface_name, handler)
+{
+	let mode_label = (mode == "ap") ? "AP" : "STA";
+	let primary_dev = devices[dev_names[0]];
+	let capabilities = handler.mlo;
+
+	if (mode == "sta" && capabilities.sta_network_on_primary &&
+		primary_dev.config.disabled) {
+		warn(`${handler.name}: drop MLO ${mode_label} ${iface_name}: primary radio is unavailable`);
+		return false;
+	}
+
+	for (let dev_name in dev_names) {
+		let dev = devices[dev_name];
+		if (dev.config.disabled)
+			continue;
+		if (index(dev.config.htmode, "EHT") != 0) {
+			warn(`${handler.name}: drop MLO ${mode_label} ${iface_name}: ${dev_name} is not EHT`);
+			return false;
+		}
+
+		let vif_limit = capabilities.vif_limit[mode];
+		let vif_count = length(filter(dev.vif, (vif) => vif.config.mode == mode));
+		if (vif_count >= vif_limit) {
+			warn(`${handler.name}: drop MLO ${mode_label} ${iface_name}: no ${mode_label} VIF slot on ${dev_name}`);
+			return false;
+		}
+	}
+
+	return true;
+}
+
+/*
+ * Preserve the configured device order. Only the primary STA member retains
+ * the network config; record its device so it starts before the others.
+ */
+function prepare_mlo_sta_config(config, dev_name, dev_names, sta_primary_dev_names)
+{
+	config.device = dev_names;
+	if (dev_name == dev_names[0])
+		push(sta_primary_dev_names, dev_name);
+	else
+		config.network = [];
+}
+
+function update_config(new_devices, mlo_vifs, sta_primary_dev_names)
 {
 	wireless.mlo = mlo_vifs;
 	hostapd_update_mlo();
@@ -92,7 +162,14 @@ function update_config(new_devices, mlo_vifs)
 		if (!new_devices[name])
 			dev.destroy();
 
-	for (let name, dev in new_devices) {
+	// Start each STA MLO primary device before the remaining devices.
+	let ordered_device_names = [
+		...sta_primary_dev_names,
+		...filter(keys(new_devices), (name) => index(sta_primary_dev_names, name) < 0)
+	];
+
+	for (let name in ordered_device_names) {
+		let dev = new_devices[name];
 		let cur_dev = wireless.devices[name];
 		if (cur_dev) {
 			cur_dev.update(dev);
@@ -116,6 +193,7 @@ function config_init(uci)
 	let devices = {};
 	let vifs = {};
 	let mlo_vifs = {};
+	let sta_primary_dev_names = [];
 
 	let sections = {
 		device: {},
@@ -166,8 +244,13 @@ function config_init(uci)
 		let radios = map(dev_names, (v) => radio_idx[v]);
 		radios = filter(radios, (v) => v != null);
 		let radio_config = map(dev_names, (v) => devices[v]?.config);
+		let mlo_handler = mlo_vif && resolve_mlo_handler(devices, dev_names);
 		let ifname;
 		let mlo_created = false;
+
+		if (mlo_handler && (data.mode == "ap" || data.mode == "sta") &&
+			!validate_mlo(devices, dev_names, data.mode, name, mlo_handler))
+			continue;
 
 		for (let dev_name in dev_names) {
 			let dev = devices[dev_name];
@@ -180,9 +263,13 @@ function config_init(uci)
 
 			let config = parse_attribute_list(data, handler.iface);
 			config.radios = radios;
+			if (mlo_handler?.mlo.sta_network_on_primary && data.mode == "sta")
+				prepare_mlo_sta_config(config, dev_name, dev_names,
+					sta_primary_dev_names);
 
 			if (mlo_vif && !mlo_created) {
-				ifname = mlo_vif_create(config, radio_config, vif_idx, mlo_vifs);
+				ifname = mlo_vif_create(config, radio_config, vif_idx,
+					mlo_vifs, mlo_handler?.mlo.mld_setup);
 				mlo_created = true;
 			}
 
@@ -315,10 +402,17 @@ function config_init(uci)
 						radios = filter(radios, (v) => v != null);
 						let radio_config = map(devs, (v) => devices[v]?.config);
 						radio_config = filter(radio_config, (v) => v != null);
+						let mlo_handler = mlo_vif && resolve_mlo_handler(devices, devs);
 						let ifname;
 
+						if (mlo_handler &&
+							(config.mode == "ap" || config.mode == "sta") &&
+							!validate_mlo(devices, devs, config.mode, name, mlo_handler))
+							continue;
+
 						if (mlo_vif) {
-							ifname = mlo_vif_create(config, radio_config, vif_idx, mlo_vifs);
+							ifname = mlo_vif_create(config, radio_config,
+								vif_idx, mlo_vifs, mlo_handler?.mlo.mld_setup);
 							mlo_vifs[ifname].radios = radios;
 						}
 
@@ -328,6 +422,10 @@ function config_init(uci)
 								continue;
 
 							let vif_config = ifname ? { ...config, ifname, radios } : config;
+							if (mlo_handler?.mlo.sta_network_on_primary &&
+								config.mode == "sta")
+								prepare_mlo_sta_config(vif_config, device, devs,
+									sta_primary_dev_names);
 							if (ifname)
 								mlo_vif_macaddr(vif_config, devs, device);
 
@@ -348,7 +446,7 @@ function config_init(uci)
 		}
 	}
 
-	update_config(devices, mlo_vifs);
+	update_config(devices, mlo_vifs, sta_primary_dev_names);
 }
 
 function config_start()
@@ -562,7 +660,9 @@ handler_load(wireless.path, (script, data) => {
 		return;
 
 	let handler = wireless.handlers[data.name] = {
+		name: data.name,
 		script,
+		mlo: data.mlo,
 	};
 	for (let kind, attr in default_config_attr) {
 		let validate = handler[kind + "_validate"] = {};

@@ -1,0 +1,13 @@
+--- a/mt_wifi/include/rtmp.h
++++ b/mt_wifi/include/rtmp.h
+@@ -2830,9 +2830,9 @@
+ 	struct Custom_VIE custom_vie;
+ #endif /* WH_EVENT_NOTIFIER */
+ 	UCHAR quick_ch_change;
++	UCHAR cac_required;
+ #ifdef CONFIG_MAP_SUPPORT
+ 	MAP_CONFIG MAPCfg;
+-	UCHAR cac_required;
+ 
+ 	UCHAR dev_role;
+ #ifdef DFS_CAC_R2

@@ -1,0 +1,119 @@
+msgid ""
+msgstr "Content-Type: text/plain; charset=UTF-8\n"
+
+msgid "Target Wake Time"
+msgstr "目标唤醒时间（TWT）"
+
+msgid "MU-MIMO DL"
+msgstr "下行 MU-MIMO"
+
+msgid "MU-MIMO UL"
+msgstr "上行 MU-MIMO"
+
+msgid "OFDMA DL"
+msgstr "下行 OFDMA"
+
+msgid "OFDMA UL"
+msgstr "上行 OFDMA"
+
+msgid "A-MSDU"
+msgstr "MSDU聚合（A-MSDU）"
+
+msgid "Auto Block ACK"
+msgstr "自动块确认"
+
+msgid "U-APSD"
+msgstr "U-APSD 省电模式"
+
+msgid "Kick low RSSI station threshold"
+msgstr "弱信号剔除阈值"
+
+msgid "Station associate threshold"
+msgstr "弱信号接入阈值"
+
+msgid "Wireless HWNAT"
+msgstr "无线硬件加速"
+
+msgid "Wireless configuration error"
+msgstr "无线网络设置错误"
+
+msgid "At least one MBSSID needs to be reserved"
+msgstr "至少需要保留1个MBSSID"
+
+msgid "SAE PWE derivation"
+msgstr "SAE 密码元素（PWE）派生算法"
+
+msgid "Hunting-and-pecking"
+msgstr "HnP 循环（Hunting-and-Pecking）"
+
+msgid "Hash-to-element"
+msgstr "H2E（Hash-to-Element）"
+
+msgid "Both"
+msgstr "两种方式"
+
+msgid "SAE groups"
+msgstr "SAE 有限循环群组"
+
+msgid "MLO AP"
+msgstr "MLO AP"
+
+msgid "Add MLO AP"
+msgstr "添加 MLO AP"
+
+msgid "MLO Access Point (MLO AP)"
+msgstr "MLO 接入点 (MLO AP)"
+
+msgid "Click \"Switch mode\" to open the MLO AP configuration."
+msgstr "请点击“切换模式”打开 MLO AP 配置。"
+
+msgid "Really switch mode?"
+msgstr "确定切换模式？"
+
+msgid "Switch mode"
+msgstr "切换模式"
+
+msgid "Member radios"
+msgstr "无线成员"
+
+msgid "Select at least two member radios."
+msgstr "请选择至少两个无线成员。"
+
+msgid "Member radio %s is not an mtwifi radio."
+msgstr "无线成员 %s 不是 mtwifi。"
+
+msgid "Member radio %s is disabled. Enable the radio first."
+msgstr "无线成员 %s 已禁用，请先启用该成员。"
+
+msgid "Member radio %s is not configured for BE/EHT. Configure the radio operating frequency first."
+msgstr "无线成员 %s 未配置为 BE/EHT，请先配置该无线的工作频率。"
+
+msgid "The number of MBSSID on %s has reached the maximum."
+msgstr "%s 上的 MBSSID 数量已达到上限。"
+
+msgid "6 GHz MLO APs only support SAE or OWE encryption."
+msgstr "6 GHz MLO AP 仅支持 SAE 或 OWE 加密。"
+
+msgid "At least one MBSSID needs to be reserved on %s."
+msgstr "%s 上至少需要保留一个 MBSSID。"
+
+msgid "MLO STA"
+msgstr "MLO STA"
+
+msgid "MLO Client (MLO STA)"
+msgstr "MLO 客户端 (MLO STA)"
+
+msgid "Join this network using the selected radio."
+msgstr "使用当前选择的无线加入此网络。"
+
+msgid "MLO STA currently requires one 2.4 GHz main radio and one 5 GHz member radio."
+msgstr "当前 MLO STA 需要一个 2.4 GHz 主无线和一个 5 GHz 成员无线。"
+
+msgid "Member radio %s already has a client interface."
+msgstr "无线成员 %s 已有客户端接口。"
+
+msgid "MLO STA currently only supports WPA3-SAE encryption."
+msgstr "当前 MLO STA 仅支持 WPA3-SAE 加密。"
+
+msgid "The scan result does not identify whether this network supports MLO. Select this mode only for a known MLO AP."
+msgstr "扫描结果无法确认该网络是否支持 MLO。请仅对已知的 MLO AP 选择此模式。"

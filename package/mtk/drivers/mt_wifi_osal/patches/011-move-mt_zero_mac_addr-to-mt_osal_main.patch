@@ -1,0 +1,22 @@
+--- a/mt_osal_main.c
++++ b/mt_osal_main.c
+@@ -21,6 +21,9 @@
+ #define SUBMODULE "mt_osal_main"
+ #include <mt_osal.h>
+ #include <mt_osal_module.h>
++#include <mt_osal_type.h>
++
++unsigned char mt_zero_mac_addr[MT_MAC_ADDR_LEN] = {0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
+ 
+ static int __init mt_wifi_osal_init(void)
+ {
+--- a/mt_osal_cfg80211.c
++++ b/mt_osal_cfg80211.c
+@@ -38,7 +38,6 @@
+ 
+ struct wireless_dev g_wdev;
+ 
+-unsigned char mt_zero_mac_addr[MT_MAC_ADDR_LEN]  = {0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
+ 
+ static struct net_device *mt_cfg80211_get_dev(
+ 	struct wiphy *pWiphy,
