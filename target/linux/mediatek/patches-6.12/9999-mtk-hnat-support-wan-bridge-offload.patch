@@ -232,13 +232,13 @@ Signed-off-by: MediaTek Inc.
   */
 @@ -2211,6 +2265,20 @@ int hnat_bind_crypto_entry(struct sk_buf
  hnat_skip_fill_inner:
- 	entry = ppe_fill_info_blk(entry, &hw_path);
+ 	entry = ppe_fill_info_blk(eth_hdr(skb), entry, &hw_path);
  
 +	if (netif_is_bridge_master(dev)) {
 +		struct net_device *br_slave;
 +
 +		br_slave = hnat_bridge_resolve_port((struct net_device *)dev,
-+						    hw_path.eth_dest,
++						    eth_hdr(skb)->h_dest,
 +						    hw_path.vlan_id);
 +		if (br_slave) {
 +			dev = br_slave;
@@ -253,13 +253,13 @@ Signed-off-by: MediaTek Inc.
  		port_id = hnat_dsa_get_port(&master_dev);
 @@ -2844,6 +2912,20 @@ hnat_entry_bind:
  	/* Fill Info Blk*/
- 	entry = ppe_fill_info_blk(entry, hw_path);
+ 	entry = ppe_fill_info_blk(eth, entry, hw_path);
  
 +	if (netif_is_bridge_master(dev)) {
 +		struct net_device *br_slave;
 +
 +		br_slave = hnat_bridge_resolve_port((struct net_device *)dev,
-+						    hw_path->eth_dest,
++						    eth->h_dest,
 +						    hw_path->vlan_id);
 +		if (br_slave) {
 +			dev = br_slave;
@@ -276,10 +276,10 @@ Signed-off-by: MediaTek Inc.
  		}
  	}
  
-+	if (netif_is_bridge_master(hw_path.dev) && is_valid_ether_addr(hw_path.eth_dest)) {
++	if (netif_is_bridge_master(hw_path.dev) && is_valid_ether_addr(eth_hdr(skb)->h_dest)) {
 +		struct net_device *br_slave;
 +
-+		br_slave = hnat_bridge_resolve_port(hw_path.dev, hw_path.eth_dest, hw_path.vlan_id);
++		br_slave = hnat_bridge_resolve_port(hw_path.dev, eth_hdr(skb)->h_dest, hw_path.vlan_id);
 +		if (br_slave) {
 +			hw_path.dev = br_slave;
 +			out = (IS_GMAC1_MODE) ? hw_path.virt_dev : hw_path.dev;
@@ -296,10 +296,10 @@ Signed-off-by: MediaTek Inc.
  				break;
  		}
 +
-+		if (netif_is_bridge_master(hw_path.dev) && is_valid_ether_addr(hw_path.eth_dest)) {
++		if (netif_is_bridge_master(hw_path.dev) && is_valid_ether_addr(eth_hdr(skb)->h_dest)) {
 +			struct net_device *br_slave;
 +
-+			br_slave = hnat_bridge_resolve_port(hw_path.dev, hw_path.eth_dest, hw_path.vlan_id);
++			br_slave = hnat_bridge_resolve_port(hw_path.dev, eth_hdr(skb)->h_dest, hw_path.vlan_id);
 +			if (br_slave) {
 +				hw_path.dev = br_slave;
 +				out = (IS_GMAC1_MODE) ? hw_path.virt_dev : hw_path.dev;

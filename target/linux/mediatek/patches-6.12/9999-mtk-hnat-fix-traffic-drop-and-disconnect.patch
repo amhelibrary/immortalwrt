@@ -1,0 +1,270 @@
+From: ImmortalWrt Developer <developer@immortalwrt.org>
+Subject: [PATCH] net: ethernet: mediatek: hnat: fix traffic drops, PPE stall, and flow disconnects
+
+This patch fixes several critical issues in mtk_hnat causing UDP game
+traffic (such as Overwatch) and remote SSH sessions to drop or disconnect:
+
+1. Use valid Ethernet MAC header (eth->h_dest / eth->h_source) instead of
+   hw_path->eth_dest / hw_path->eth_src when filling L2 info into PPE FOE
+   entries. In PPPoE or routed environments, hw_path->eth_dest is all-zero,
+   causing PPE to emit packets with 00:00:00:00:00:00 MAC to upstream gateways,
+   which drops the traffic as soon as the flow is bound to hardware.
+2. In __hnat_cache_clr(), replace the blocking PPE disable and busy-waiting
+   loop (which stalls hardware packet forwarding for up to 1 second) with a
+   single-cycle CAH_X_MODE hardware toggle matching MediaTek's latest SDK.
+3. In mtk_hnat_nf_post_routing(), return 0 instead of -1 when FOE entry
+   index is out of range, preventing the Netfilter hook from dropping packets.
+4. In skb_to_hnat_info(), use spin_lock_bh instead of spin_trylock_bh to
+   prevent flow binding failures under multi-core lock contention.
+
+Signed-off-by: ImmortalWrt Developer <developer@immortalwrt.org>
+---
+diff --git a/drivers/net/ethernet/mediatek/mtk_hnat/hnat.c b/drivers/net/ethernet/mediatek/mtk_hnat/hnat.c
+index 4c8078b137..cb1e3f6b6c 100644
+--- a/drivers/net/ethernet/mediatek/mtk_hnat/hnat.c
++++ b/drivers/net/ethernet/mediatek/mtk_hnat/hnat.c
+@@ -977,74 +977,19 @@ static irqreturn_t hnat_handle_fe_irq2(int irq, void *priv)
+ 
+ void __hnat_cache_clr(u32 ppe_id)
+ {
+-	static const u32 mask = BIT_ALERT_TCP_FIN_RST_SYN |
+-				BIT_MD_TOAP_BYP_CRSN0 |
+-				BIT_MD_TOAP_BYP_CRSN1 |
+-				BIT_MD_TOAP_BYP_CRSN2 |
+-				BIT_IP_PROT_CHK_BLIST |
+-				BIT_IPV4_NAT_FRAG_EN |
+-				BIT_IPV4_HASH_GREK |
+-				BIT_IPV6_HASH_GREK |
+-				BIT_CS0_RM_ALL_IP6_IP_EN |
+-				BIT_L2_HASH_ETH |
+-				BIT_L2_HASH_VID;
+-	u32 cah_en, flow_cfg, scan_mode;
+-	u32 i, idle, retry;
+-
+ 	if (ppe_id >= CFG_PPE_NUM)
+ 		return;
+ 
+-	/* disable table learning */
+-	flow_cfg = readl(hnat_priv->ppe_base[ppe_id] + PPE_FLOW_CFG);
+-	writel(flow_cfg & mask, hnat_priv->ppe_base[ppe_id] + PPE_FLOW_CFG);
+-	/* wait PPE return to idle */
+-	udelay(100);
+-
+-	for (retry = 0; retry < 10; retry++) {
+-		for (i = 0, idle = 0; i < 3; i++) {
+-			if ((readl(hnat_priv->ppe_base[ppe_id] + PPE_CAH_DBG) & CAH_DBG_BUSY) == 0)
+-				idle++;
+-		}
+-
+-		if (idle >= 3)
+-			break;
+-
+-		udelay(10);
+-	}
+-
+-	if (retry >= 10) {
+-		pr_info("%s: ppe cache idle check timeout!\n", __func__);
+-		goto out;
+-	}
+-
+-	/* disable scan mode */
+-	scan_mode = FIELD_GET(SCAN_MODE, readl(hnat_priv->ppe_base[ppe_id] + PPE_TB_CFG));
+-	cr_set_field(hnat_priv->ppe_base[ppe_id] + PPE_TB_CFG, SCAN_MODE, 0);
+-	/* disable cache */
+-	cah_en = readl(hnat_priv->ppe_base[ppe_id] + PPE_CAH_CTRL) & CAH_EN;
+-	cr_set_field(hnat_priv->ppe_base[ppe_id] + PPE_CAH_CTRL, CAH_EN, 0);
+-
+-	/* invalidate PPE cache lines */
++	/* Invalidate PPE cache lines via fast hardware toggle without stalling flow learning */
+ 	cr_set_field(hnat_priv->ppe_base[ppe_id] + PPE_CAH_CTRL, CAH_X_MODE, 1);
+ 	cr_set_field(hnat_priv->ppe_base[ppe_id] + PPE_CAH_CTRL, CAH_X_MODE, 0);
+-
+-	/* lock the preserved cache line */
+-	if (hnat_priv->data->version >= MTK_HNAT_V2)
+-		__hnat_write_cache_line(ppe_id, 0, 0x7FFF, 3, NULL);
+-	else
+-		__hnat_write_cache_line(ppe_id, 0, 0x3FFF, 3, NULL);
+-
+-	/* restore cache enable */
+-	cr_set_field(hnat_priv->ppe_base[ppe_id] + PPE_CAH_CTRL, CAH_EN, cah_en);
+-	/* restore scan mode */
+-	cr_set_field(hnat_priv->ppe_base[ppe_id] + PPE_TB_CFG, SCAN_MODE, scan_mode);
+-out:
+-	/* restore table learning */
+-	writel(flow_cfg, hnat_priv->ppe_base[ppe_id] + PPE_FLOW_CFG);
+ }
+ 
+ void hnat_cache_clr(u32 ppe_id)
+ {
++	if (ppe_id >= CFG_PPE_NUM)
++		return;
++
+ 	spin_lock_bh(&hnat_priv->cah_lock);
+ 	__hnat_cache_clr(ppe_id);
+ 	spin_unlock_bh(&hnat_priv->cah_lock);
+diff --git a/drivers/net/ethernet/mediatek/mtk_hnat/hnat_nf_hook.c b/drivers/net/ethernet/mediatek/mtk_hnat/hnat_nf_hook.c
+index 8c1d03ec0e..3d141cb086 100644
+--- a/drivers/net/ethernet/mediatek/mtk_hnat/hnat_nf_hook.c
++++ b/drivers/net/ethernet/mediatek/mtk_hnat/hnat_nf_hook.c
+@@ -1746,22 +1746,37 @@ static int hnat_add_vlan_layer(struct foe_entry *entry, u16 vlan_tci, bool outer
+ 	return 0;
+ }
+ 
+-static struct foe_entry ppe_fill_L2_info(struct foe_entry entry,
++static struct ethhdr *get_ipv6_ipip_ethhdr(struct sk_buff *skb,
++					   struct flow_offload_hw_path *hw_path)
++{
++	struct ethhdr *eth;
++	u16 eth_pppoe_hlen = ETH_HLEN + PPPOE_SES_HLEN;
++
++	if (hw_path->flags & BIT(DEV_PATH_PPPOE))
++		eth = (struct ethhdr *)(skb->data - eth_pppoe_hlen);
++	else
++		eth = (struct ethhdr *)(skb->data - ETH_HLEN);
++
++	return eth;
++}
++
++static struct foe_entry ppe_fill_L2_info(struct ethhdr *eth,
++					 struct foe_entry entry,
+ 					 struct flow_offload_hw_path *hw_path)
+ {
+ 	switch ((int)entry.bfib1.pkt_type) {
+ 	case L2_BRIDGE:
+-		entry.l2_bridge.new_dmac_hi = swab32(*((u32 *)hw_path->eth_dest));
+-		entry.l2_bridge.new_dmac_lo = swab16(*((u16 *)&hw_path->eth_dest[4]));
+-		entry.l2_bridge.new_smac_hi = swab32(*((u32 *)hw_path->eth_src));
+-		entry.l2_bridge.new_smac_lo = swab16(*((u16 *)&hw_path->eth_src[4]));
++		entry.l2_bridge.new_dmac_hi = swab32(*((u32 *)eth->h_dest));
++		entry.l2_bridge.new_dmac_lo = swab16(*((u16 *)&eth->h_dest[4]));
++		entry.l2_bridge.new_smac_hi = swab32(*((u32 *)eth->h_source));
++		entry.l2_bridge.new_smac_lo = swab16(*((u16 *)&eth->h_source[4]));
+ 		break;
+ 	case IPV4_HNAPT:
+ 	case IPV4_HNAT:
+-		entry.ipv4_hnapt.dmac_hi = swab32(*((u32 *)hw_path->eth_dest));
+-		entry.ipv4_hnapt.dmac_lo = swab16(*((u16 *)&hw_path->eth_dest[4]));
+-		entry.ipv4_hnapt.smac_hi = swab32(*((u32 *)hw_path->eth_src));
+-		entry.ipv4_hnapt.smac_lo = swab16(*((u16 *)&hw_path->eth_src[4]));
++		entry.ipv4_hnapt.dmac_hi = swab32(*((u32 *)eth->h_dest));
++		entry.ipv4_hnapt.dmac_lo = swab16(*((u16 *)&eth->h_dest[4]));
++		entry.ipv4_hnapt.smac_hi = swab32(*((u32 *)eth->h_source));
++		entry.ipv4_hnapt.smac_lo = swab16(*((u16 *)&eth->h_source[4]));
+ 		entry.ipv4_hnapt.pppoe_id = hw_path->pppoe_sid;
+ 		break;
+ 	case IPV4_DSLITE:
+@@ -1771,10 +1786,10 @@ static struct foe_entry ppe_fill_L2_info(struct foe_entry entry,
+ 	case IPV6_3T_ROUTE:
+ 	case IPV6_HNAPT:
+ 	case IPV6_HNAT:
+-		entry.ipv6_5t_route.dmac_hi = swab32(*((u32 *)hw_path->eth_dest));
+-		entry.ipv6_5t_route.dmac_lo = swab16(*((u16 *)&hw_path->eth_dest[4]));
+-		entry.ipv6_5t_route.smac_hi = swab32(*((u32 *)hw_path->eth_src));
+-		entry.ipv6_5t_route.smac_lo = swab16(*((u16 *)&hw_path->eth_src[4]));
++		entry.ipv6_5t_route.dmac_hi = swab32(*((u32 *)eth->h_dest));
++		entry.ipv6_5t_route.dmac_lo = swab16(*((u16 *)&eth->h_dest[4]));
++		entry.ipv6_5t_route.smac_hi = swab32(*((u32 *)eth->h_source));
++		entry.ipv6_5t_route.smac_lo = swab16(*((u16 *)&eth->h_source[4]));
+ 		entry.ipv6_5t_route.pppoe_id = hw_path->pppoe_sid;
+ 		break;
+ 	}
+@@ -1804,7 +1819,8 @@ static bool hnat_is_hw_path_bridging(struct flow_offload_hw_path *hw_path)
+ 	return ret;
+ }
+ 
+-static struct foe_entry ppe_fill_info_blk(struct foe_entry entry,
++static struct foe_entry ppe_fill_info_blk(struct ethhdr *eth,
++					  struct foe_entry entry,
+ 					  struct flow_offload_hw_path *hw_path)
+ {
+ 	entry.bfib1.psn = (hw_path->flags & BIT(DEV_PATH_PPPOE)) ? 1 : 0;
+@@ -1819,7 +1835,7 @@ static struct foe_entry ppe_fill_info_blk(struct foe_entry entry,
+ 	switch ((int)entry.bfib1.pkt_type) {
+ 	case L2_BRIDGE:
+ 		if (mcast_hook_toggle &&
+-		    is_multicast_ether_addr(&hw_path->eth_dest[0]))
++		    is_multicast_ether_addr(&eth->h_dest[0]))
+ 			entry.l2_bridge.iblk2.mcast = 1;
+ 		else
+ 			entry.l2_bridge.iblk2.mcast = 0;
+@@ -1832,7 +1848,7 @@ static struct foe_entry ppe_fill_info_blk(struct foe_entry entry,
+ 	case IPV4_HNAPT:
+ 	case IPV4_HNAT:
+ 		if (mcast_hook_toggle &&
+-		    is_multicast_ether_addr(&hw_path->eth_dest[0])) {
++		    is_multicast_ether_addr(&eth->h_dest[0])) {
+ 			if (hnat_priv->data->version == MTK_HNAT_V1_3) {
+ 				entry.bfib1.sta = 1;
+ 				entry.ipv4_hnapt.m_timestamp = foe_timestamp(hnat_priv, true);
+@@ -1856,7 +1872,7 @@ static struct foe_entry ppe_fill_info_blk(struct foe_entry entry,
+ 	case IPV6_HNAPT:
+ 	case IPV6_HNAT:
+ 		if (mcast_hook_toggle &&
+-		    is_multicast_ether_addr(&hw_path->eth_dest[0])) {
++		    is_multicast_ether_addr(&eth->h_dest[0])) {
+ 			if (hnat_priv->data->version == MTK_HNAT_V1_3) {
+ 				entry.bfib1.sta = 1;
+ 				entry.ipv4_hnapt.m_timestamp = foe_timestamp(hnat_priv, true);
+@@ -2209,7 +2225,7 @@ int hnat_bind_crypto_entry(struct sk_buff *skb, const struct net_device *dev, in
+ 	}
+ 
+ hnat_skip_fill_inner:
+-	entry = ppe_fill_info_blk(entry, &hw_path);
++	entry = ppe_fill_info_blk(eth_hdr(skb), entry, &hw_path);
+ 
+ 	if (IS_LAN_GRP(dev) || IS_WAN(dev)) { /* Forward to GMAC Ports */
+ 		master_dev = (struct net_device *)dev;
+@@ -2358,8 +2374,14 @@ static int skb_to_hnat_info(struct sk_buff *skb,
+ 	u16 h_proto = 0;
+ 	struct ethhdr *eth;
+ 
+-	/*do not bind multicast if PPE mcast not enable*/
+-	if (!mcast_hook_toggle && is_multicast_ether_addr(hw_path->eth_dest))
++	if (ipv6_hdr(skb)->nexthdr == NEXTHDR_IPIP)
++		/* point to ethernet header for DS-Lite and MapE */
++		eth = get_ipv6_ipip_ethhdr(skb, hw_path);
++	else
++		eth = eth_hdr(skb);
++
++	/* do not bind multicast if PPE mcast not enable */
++	if (!mcast_hook_toggle && is_multicast_ether_addr(eth->h_dest))
+ 		return -1;
+ 
+ 	ret = hnat_offload_engine_done(skb, hw_path);
+@@ -2831,7 +2853,7 @@ static int skb_to_hnat_info(struct sk_buff *skb,
+ 	}
+ 
+ 	/* Fill Layer2 Info.*/
+-	entry = ppe_fill_L2_info(entry, hw_path);
++	entry = ppe_fill_L2_info(eth, entry, hw_path);
+ 
+ 	if ((skb_hnat_tops(skb) && hw_path->flags & BIT(DEV_PATH_TNL)) ||
+ 	    (!skb_hnat_cdrt(skb) && skb_hnat_is_encrypt(skb) &&
+@@ -2842,7 +2864,7 @@ static int skb_to_hnat_info(struct sk_buff *skb,
+ 
+ hnat_entry_bind:
+ 	/* Fill Info Blk*/
+-	entry = ppe_fill_info_blk(entry, hw_path);
++	entry = ppe_fill_info_blk(eth, entry, hw_path);
+ 
+ 	if (IS_LAN_GRP(dev) || IS_WAN(dev)) { /* Forward to GMAC Ports */
+ 		port_id = hnat_dsa_get_port(&master_dev);
+@@ -3120,8 +3142,7 @@ hnat_entry_bind:
+ 			return NF_ACCEPT;
+ 	}
+ 
+-	if (!spin_trylock_bh(&hnat_priv->entry_lock))
+-		return -1;
++	spin_lock_bh(&hnat_priv->entry_lock);
+ 	/* Final check if the entry is not in UNBIND state,
+ 	 * we should not modify it right now.
+ 	 */
+@@ -4024,7 +4045,7 @@ static unsigned int mtk_hnat_nf_post_routing(
+ 
+ 	if (skb_hnat_entry(skb) >= hnat_priv->foe_etry_num ||
+ 	    skb_hnat_ppe(skb) >= CFG_PPE_NUM)
+-		return -1;
++		return 0;
+ 
+ 	entry = &hnat_priv->foe_table_cpu[skb_hnat_ppe(skb)][skb_hnat_entry(skb)];
+ 
