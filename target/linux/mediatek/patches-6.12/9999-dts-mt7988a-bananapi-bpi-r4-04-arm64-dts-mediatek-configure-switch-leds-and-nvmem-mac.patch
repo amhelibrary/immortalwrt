@@ -1,0 +1,236 @@
+--- a/arch/arm64/boot/dts/mediatek/mt7988a-bananapi-bpi-r4-2g5.dts
++++ b/arch/arm64/boot/dts/mediatek/mt7988a-bananapi-bpi-r4-2g5.dts
+@@ -14,6 +14,10 @@
+ 	phy-mode = "internal";
+ 	phy-connection-type = "internal";
+ 	phy = <&int_2p5g_phy>;
++	nvmem-cell-names = "mac-address";
++	nvmem-cells = <&gmac0_mac>;
++	openwrt,netdev-name = "lan4";
++	status = "okay";
+ };
+ 
+ &int_2p5g_phy {
+@@ -21,15 +25,9 @@
+ 	pinctrl-0 = <&i2p5gbe_led0_pins>;
+ };
+ 
+-&gmac1 {
+-	phy-mode = "internal";
+-	phy-connection-type = "internal";
+-	phy = <&int_2p5g_phy>;
+-	openwrt,netdev-name = "lan4";
++&i2p5gbe_led0 {
++	color = <LED_COLOR_ID_GREEN>;
++	function = LED_FUNCTION_LAN;
++	linux,default-trigger = "netdev";
+ 	status = "okay";
+ };
+-
+-&int_2p5g_phy {
+-	pinctrl-names = "i2p5gbe-led";
+-	pinctrl-0 = <&i2p5gbe_led0_pins>;
+-};
+--- a/arch/arm64/boot/dts/mediatek/mt7988a-bananapi-bpi-r4.dtsi
++++ b/arch/arm64/boot/dts/mediatek/mt7988a-bananapi-bpi-r4.dtsi
+@@ -118,6 +118,8 @@
+ };
+ 
+ &gmac0 {
++	nvmem-cell-names = "mac-address";
++	nvmem-cells = <&gmac0_mac>;
+ 	status = "okay";
+ };
+ 
+@@ -125,6 +127,8 @@
+ 	sfp = <&sfp1>;
+ 	managed = "in-band-status";
+ 	phy-mode = "usxgmii";
++	nvmem-cell-names = "mac-address";
++	nvmem-cells = <&gmac0_mac>;
+ 	openwrt,netdev-name = "sfp-wan";
+ 	status = "okay";
+ };
+@@ -143,9 +147,10 @@
+ };
+ 
+ &gsw_phy0_led0 {
+-	status = "okay";
+-	function = LED_FUNCTION_WAN;
+ 	color = <LED_COLOR_ID_GREEN>;
++	function = LED_FUNCTION_WAN;
++	linux,default-trigger = "netdev";
++	status = "okay";
+ };
+ 
+ &gsw_phy1 {
+@@ -158,9 +163,10 @@
+ };
+ 
+ &gsw_phy1_led0 {
+-	status = "okay";
+-	function = LED_FUNCTION_LAN;
+ 	color = <LED_COLOR_ID_GREEN>;
++	function = LED_FUNCTION_LAN;
++	linux,default-trigger = "netdev";
++	status = "okay";
+ };
+ 
+ &gsw_phy2 {
+@@ -173,9 +179,10 @@
+ };
+ 
+ &gsw_phy2_led0 {
+-	status = "okay";
+-	function = LED_FUNCTION_LAN;
+ 	color = <LED_COLOR_ID_GREEN>;
++	function = LED_FUNCTION_LAN;
++	linux,default-trigger = "netdev";
++	status = "okay";
+ };
+ 
+ &gsw_phy3 {
+@@ -188,9 +195,10 @@
+ };
+ 
+ &gsw_phy3_led0 {
+-	status = "okay";
+-	function = LED_FUNCTION_LAN;
+ 	color = <LED_COLOR_ID_GREEN>;
++	function = LED_FUNCTION_LAN;
++	linux,default-trigger = "netdev";
++	status = "okay";
+ };
+ 
+ &cci {
+@@ -261,63 +269,6 @@
+ 	};
+ };
+ 
+-&gmac2 {
+-	sfp = <&sfp1>;
+-	managed = "in-band-status";
+-	phy-mode = "usxgmii";
+-};
+-
+-&gsw_phy0 {
+-	pinctrl-names = "gbe-led";
+-	label = "wan";
+-	pinctrl-0 = <&gbe0_led0_pins>;
+-};
+-
+-&gsw_phy0_led0 {
+-	status = "okay";
+-	function = LED_FUNCTION_WAN;
+-	color = <LED_COLOR_ID_GREEN>;
+-};
+-
+-&gsw_phy1 {
+-	pinctrl-names = "gbe-led";
+-	label = "lan1";
+-	pinctrl-0 = <&gbe1_led0_pins>;
+-};
+-
+-&gsw_phy1_led0 {
+-	status = "okay";
+-	function = LED_FUNCTION_LAN;
+-	color = <LED_COLOR_ID_GREEN>;
+-};
+-
+-&gsw_phy2 {
+-	pinctrl-names = "gbe-led";
+-	label = "lan2";
+-	pinctrl-0 = <&gbe2_led0_pins>;
+-};
+-
+-&gsw_phy2_led0 {
+-	status = "okay";
+-	function = LED_FUNCTION_LAN;
+-	color = <LED_COLOR_ID_GREEN>;
+-};
+-
+-&gsw_phy3 {
+-	pinctrl-names = "gbe-led";
+-	label = "lan3";
+-	pinctrl-0 = <&gbe3_led0_pins>;
+-};
+-
+-&gsw_phy3_led0 {
+-	status = "okay";
+-	function = LED_FUNCTION_LAN;
+-	color = <LED_COLOR_ID_GREEN>;
+-};
+-
+-&cci {
+-	proc-supply = <&rt5190_buck3>;
+-};
+ 
+ &i2c0 {
+ 	pinctrl-names = "default";
+@@ -476,6 +427,66 @@
+ 	};
+ };
+ 
++&spi_nand {
++	partitions {
++		compatible = "fixed-partitions";
++		#address-cells = <1>;
++		#size-cells = <1>;
++
++		partition@0 {
++			label = "BL2";
++			reg = <0x00000 0x0100000>;
++			read-only;
++		};
++
++
++		partition@100000 {
++			label = "u-boot-env";
++			reg = <0x0100000 0x0080000>;
++		};
++
++		factory: partition@180000 {
++			label = "Factory";
++			reg = <0x180000 0x0400000>;
++
++			nvmem-layout {
++				compatible = "fixed-layout";
++				#address-cells = <1>;
++				#size-cells = <1>;
++
++				gmac2_mac: eeprom@fffee {
++					reg = <0xfffee 0x6>;
++				};
++
++				gmac1_mac: eeprom@ffffa {
++					reg = <0xffffa 0x6>;
++				};
++
++				gmac0_mac: eeprom@ffff4 {
++					reg = <0xffff4 0x6>;
++				};
++			};
++		};
++
++		partition@580000 {
++			label = "FIP";
++			reg = <0x580000 0x0200000>;
++		};
++
++		partition@780000 {
++			label = "ubi";
++			reg = <0x780000 0x7080000>;
++			compatible = "linux,ubi";
++
++			volumes {
++				ubi_rootfs: ubi-volume-fit {
++					volname = "firmware";
++				};
++			};
++		};
++	};
++};
++
+ &spi1 {
+ 	status = "okay";
+ };
