@@ -146,6 +146,7 @@ platform_do_upgrade() {
 		export_fitblk_bootdev
 		if [ -z "$CI_METHOD" ]; then
 			local mmc_part="$(find_mmc_part "firmware")"
+			[ -z "$mmc_part" ] && mmc_part="$(find_mmc_part "firmware2")"
 			[ -z "$mmc_part" ] && mmc_part="$(find_mmc_part "production")"
 			if [ -n "$mmc_part" ]; then
 				export EMMC_KERN_DEV="$mmc_part"
@@ -154,10 +155,11 @@ platform_do_upgrade() {
 		fi
 		case "$CI_METHOD" in
 		emmc)
-			emmc_do_upgrade "$1"
+			mmc_do_upgrade "$1"
 			;;
 		ubi)
-			nand_do_upgrade "$1"
+			CI_KERNPART="firmware"
+			ubi_do_upgrade "$1"
 			;;
 		default)
 			default_do_upgrade "$1"
@@ -517,6 +519,7 @@ platform_copy_config() {
 	mediatek,mt7988d-rfb-gsw)
 		if [ -z "$CI_METHOD" ]; then
 			local mmc_part="$(find_mmc_part "firmware")"
+			[ -z "$mmc_part" ] && mmc_part="$(find_mmc_part "firmware2")"
 			[ -z "$mmc_part" ] && mmc_part="$(find_mmc_part "production")"
 			if [ -n "$mmc_part" ]; then
 				[ -z "$EMMC_KERN_DEV" ] && export EMMC_KERN_DEV="$mmc_part"
@@ -524,7 +527,7 @@ platform_copy_config() {
 			fi
 		fi
 		if [ "$CI_METHOD" = "emmc" ]; then
-			emmc_copy_config
+			mmc_copy_config
 		fi
 		;;
 	acer,predator-w6|\

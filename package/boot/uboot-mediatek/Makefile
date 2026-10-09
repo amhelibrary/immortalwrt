@@ -651,10 +651,12 @@ define Build/gpt-emmc-mt798x-itb
 	-g \
 	-o $(PKG_BUILD_DIR)/GPT_EMMC_mt798x_itb.bin \
 	-a 1 -l 1024 \
-	-t 0x83 -N u-boot-env -r -p 4M@8192 \
-	-t 0x83 -N factory    -r -p 4M@16384 \
-	-t 0xef -N fip        -r -p 4M@24576 \
-	-t 0x2e -N firmware   -p 256M@32768
+	-t 0x83 -N u-boot-env -r -p 4M@4M \
+	-t 0x83 -N factory    -r -p 4M@8M \
+	-t 0xef -N fip        -r -p 4M@12M \
+	-t 0x83 -N bspconf    -r -p 4M@16M \
+	-t 0x2e -N firmware   -p 256M@20M \
+	-t 0x2e -N firmware2  -p 256M
 endef
 
 define Build/gpt-sd-mt798x-itb
@@ -663,11 +665,13 @@ define Build/gpt-sd-mt798x-itb
 	-o $(PKG_BUILD_DIR)/GPT_SD_mt798x_itb.bin \
 	-a 1 -l 1024 \
 	-H \
-	-t 0x83 -N bl2        -r -p 3M@2048 \
-	-t 0x83 -N u-boot-env -r -p 4M@8192 \
-	-t 0x83 -N factory    -r -p 4M@16384 \
-	-t 0xef -N fip        -r -p 4M@24576 \
-	-t 0x2e -N firmware   -p 256M@32768
+	-t 0x83 -N bl2        -r -p 4079k@17k \
+	-t 0x83 -N u-boot-env -r -p 4M@4M \
+	-t 0x83 -N factory    -r -p 4M@8M \
+	-t 0xef -N fip        -r -p 4M@12M \
+	-t 0x83 -N bspconf    -r -p 4M@16M \
+	-t 0x2e -N firmware   -p 256M@20M \
+	-t 0x2e -N firmware2  -p 256M
 endef
 
 define Build/chainload-image

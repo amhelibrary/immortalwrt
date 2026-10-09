@@ -86,11 +86,12 @@ define Build/mt7988-sdmmc-mtk-gpt
 	ptgen -g -o $@.tmp -a 1 -l 1024 \
 			-H \
 			-t 0x83	-N bl2		-r	-p 4079k@17k \
-			-t 0x83	-N u-boot-env	-r	-p 512k@4M \
-			-t 0x83	-N factory	-r	-p 2M@4608k \
-			-t 0xef	-N fip		-r	-p 4M@6656k \
-			-t 0xef -N kernel	-r	-p 116M@12M \
-			-t 0x2e -N firmware		-p $(CONFIG_TARGET_ROOTFS_PARTSIZE)M@128M
+			-t 0x83	-N u-boot-env	-r	-p 4M@4M \
+			-t 0x83	-N factory	-r	-p 4M@8M \
+			-t 0xef	-N fip		-r	-p 4M@12M \
+			-t 0x83	-N bspconf	-r	-p 4M@16M \
+			-t 0x2e -N firmware		-p $(CONFIG_TARGET_ROOTFS_PARTSIZE)M@20M \
+			-t 0x2e -N firmware2		-p $(CONFIG_TARGET_ROOTFS_PARTSIZE)M
 	cat $@.tmp >> $@
 	rm $@.tmp
 endef
@@ -683,7 +684,8 @@ define Device/bananapi_bpi-r4-common
 	mt7988a-bananapi-bpi-r4-sd 
   DEVICE_DTC_FLAGS := --pad 4096
   DEVICE_PACKAGES := kmod-hwmon-pwmfan kmod-i2c-mux-pca954x kmod-eeprom-at24 \
-		     kmod-rtc-pcf8563 kmod-sfp kmod-usb3 e2fsprogs f2fsck mkf2fs mt7988-wo-firmware
+		     kmod-rtc-pcf8563 kmod-sfp kmod-usb3 e2fsprogs f2fsck mkf2fs mt7988-wo-firmware \
+		     blkid bspconf kmod-reset-boot-count
   DEVICE_COMPAT_VERSION := 1.1
   DEVICE_COMPAT_MESSAGE := The non-switch ports were renamed to match the board/case labels
   IMAGES := sysupgrade.itb
@@ -700,15 +702,12 @@ define Device/bananapi_bpi-r4-common
   ARTIFACT/snand-bl31-uboot.fip	:= mt7988-bl31-uboot $$(DEVICE_NAME)-snand
   ARTIFACT/sdcard.img.gz	:= mt7988-sdmmc-mtk-gpt |\
 				   pad-to 17k | mt7988-bl2 sdmmc-comb |\
-				   pad-to 6656k | mt7988-bl31-uboot $$(DEVICE_NAME)-sdmmc |\
-				$(if $(CONFIG_TARGET_ROOTFS_INITRAMFS),\
-				   pad-to 12M | append-image-stage initramfs-recovery.itb | check-size 128m |\
-				) \
+				   pad-to 12M | mt7988-bl31-uboot $$(DEVICE_NAME)-sdmmc |\
 				$(if $(CONFIG_TARGET_ROOTFS_SQUASHFS),\
-				   pad-to 128M | append-image squashfs-sysupgrade.itb | check-size |\
+				   pad-to 20M | append-image squashfs-sysupgrade.itb | check-size |\
 				) \
 				  gzip
-  IMAGE_SIZE := $$(shell expr 128 + $$(CONFIG_TARGET_ROOTFS_PARTSIZE))m
+  IMAGE_SIZE := $$(shell expr 20 + $$(CONFIG_TARGET_ROOTFS_PARTSIZE) + $$(CONFIG_TARGET_ROOTFS_PARTSIZE))m
   KERNEL			:= kernel-bin | gzip
   KERNEL_INITRAMFS := kernel-bin | lzma | \
 	fit lzma $$(KDIR)/image-$$(firstword $$(DEVICE_DTS)).dtb with-initrd | pad-to 64k

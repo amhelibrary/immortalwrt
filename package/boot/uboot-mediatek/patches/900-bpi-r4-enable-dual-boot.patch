@@ -1,0 +1,127 @@
+diff -uprN a/board/mediatek/common/mmc_helper.c b/board/mediatek/common/mmc_helper.c
+--- a/board/mediatek/common/mmc_helper.c	2026-01-23 14:28:56.000000000 +0800
++++ b/board/mediatek/common/mmc_helper.c	2026-10-08 18:04:45.427152957 +0800
+@@ -811,13 +811,24 @@ static int mmc_set_fdtargs_basic(struct
+ 				 "0x%llx", env_off);
+ 
+ 			ret = fdtargs_set("mediatek,env-redund-offset",
+-					  env_redund_offset);
+-			if (ret)
+-				return ret;
+-		}
+-	}
++  env_redund_offset);
++if (ret)
++return ret;
++}
++}
++
++#ifdef CONFIG_MTK_BSPCONF_SUPPORT
++{
++char bspconf_part[BOOT_PARAM_STR_MAX_LEN];
++
++ret = mmc_set_fdtarg_part(mmc, MTK_BSP_CONF_NAME,
++  "mediatek,bspconf-part", bspconf_part);
++if (!ret)
++fdtargs_set("mediatek,bspconf-part-type", "blk");
++}
++#endif
+ 
+-	return 0;
++return 0;
+ }
+ 
+ static int _boot_from_mmc(struct mmc *mmc, u64 offset, bool do_boot)
+diff -uprN a/board/mediatek/common/mtd_helper.c b/board/mediatek/common/mtd_helper.c
+--- a/board/mediatek/common/mtd_helper.c	2026-01-23 14:28:56.000000000 +0800
++++ b/board/mediatek/common/mtd_helper.c	2026-10-08 18:04:45.427152957 +0800
+@@ -537,11 +537,21 @@ static int mtd_set_fdtargs_basic(void)
+ 
+ 	snprintf(env_size, sizeof(env_size), "0x%x", CONFIG_ENV_SIZE);
+ 
+-	ret = fdtargs_set("mediatek,env-size", env_size);
+-	if (ret)
+-		return ret;
++ret = fdtargs_set("mediatek,env-size", env_size);
++if (ret)
++return ret;
+ 
+-	return 0;
++#ifdef CONFIG_MTK_BSPCONF_SUPPORT
++ret = fdtargs_set("mediatek,bspconf-part-type", "ubi");
++if (ret)
++return ret;
++
++ret = fdtargs_set("mediatek,bspconf-part-vol", MTK_BSP_CONF_NAME);
++if (ret)
++return ret;
++#endif
++
++return 0;
+ }
+ 
+ int boot_from_mtd(struct mtd_info *mtd, u64 offset, bool do_boot)
+diff -uprN a/configs/bananapi_r4_sd_defconfig b/configs/bananapi_r4_sd_defconfig
+--- a/configs/bananapi_r4_sd_defconfig	2026-09-19 15:36:42.733660653 +0800
++++ b/configs/bananapi_r4_sd_defconfig	2026-10-08 18:04:45.423150957 +0800
+@@ -24,6 +24,12 @@ CONFIG_MTK_UBI_SUPPORT=y
+ CONFIG_MTK_DEFAULT_FIT_BOOT_CONF="config-mt7988a-bananapi-bpi-r4#mt7988a-bananapi-bpi-r4-sd"
+ CONFIG_MTK_UPGRADE_BL2_VERIFY=y
+ CONFIG_MTK_UPGRADE_FIP_VERIFY=y
++CONFIG_MTK_DUAL_BOOT=y
++CONFIG_MTK_DUAL_BOOT_ITB_IMAGE=y
++CONFIG_MTK_DUAL_BOOT_ENABLE_RETRY=y
++CONFIG_MTK_DUAL_BOOT_MAX_RETRY_COUNT=3
++CONFIG_MTK_DUAL_BOOT_SLOT_1_FIRMWARE_NAME="firmware2"
++CONFIG_MTK_BSPCONF_SUPPORT=y
+ CONFIG_ENABLE_NAND_NMBM=y
+ # CONFIG_EFI_LOADER is not set
+ CONFIG_AUTOBOOT_MENU_SHOW=y
+diff -uprN a/configs/mt7988_emmc_rfb_defconfig b/configs/mt7988_emmc_rfb_defconfig
+--- a/configs/mt7988_emmc_rfb_defconfig	2026-01-23 14:28:56.000000000 +0800
++++ b/configs/mt7988_emmc_rfb_defconfig	2026-10-08 18:04:45.423150957 +0800
+@@ -23,6 +23,12 @@ CONFIG_MTK_WEB_FAILSAFE_AFTER_BOOT_FAILU
+ CONFIG_MTK_DEFAULT_FIT_BOOT_CONF="mt7988a-rfb-emmc"
+ CONFIG_MTK_UPGRADE_BL2_VERIFY=y
+ CONFIG_MTK_UPGRADE_FIP_VERIFY=y
++CONFIG_MTK_DUAL_BOOT=y
++CONFIG_MTK_DUAL_BOOT_ITB_IMAGE=y
++CONFIG_MTK_DUAL_BOOT_ENABLE_RETRY=y
++CONFIG_MTK_DUAL_BOOT_MAX_RETRY_COUNT=3
++CONFIG_MTK_DUAL_BOOT_SLOT_1_FIRMWARE_NAME="firmware2"
++CONFIG_MTK_BSPCONF_SUPPORT=y
+ # CONFIG_EFI_LOADER is not set
+ # CONFIG_BOOTSTD is not set
+ CONFIG_AUTOBOOT_MENU_SHOW=y
+diff -uprN a/configs/mt7988_sd_rfb_defconfig b/configs/mt7988_sd_rfb_defconfig
+--- a/configs/mt7988_sd_rfb_defconfig	2026-01-23 14:28:56.000000000 +0800
++++ b/configs/mt7988_sd_rfb_defconfig	2026-10-08 18:04:45.423150957 +0800
+@@ -24,6 +24,12 @@ CONFIG_MTK_WEB_FAILSAFE_AFTER_BOOT_FAILU
+ CONFIG_MTK_DEFAULT_FIT_BOOT_CONF="mt7988a-rfb-sd"
+ CONFIG_MTK_UPGRADE_BL2_VERIFY=y
+ CONFIG_MTK_UPGRADE_FIP_VERIFY=y
++CONFIG_MTK_DUAL_BOOT=y
++CONFIG_MTK_DUAL_BOOT_ITB_IMAGE=y
++CONFIG_MTK_DUAL_BOOT_ENABLE_RETRY=y
++CONFIG_MTK_DUAL_BOOT_MAX_RETRY_COUNT=3
++CONFIG_MTK_DUAL_BOOT_SLOT_1_FIRMWARE_NAME="firmware2"
++CONFIG_MTK_BSPCONF_SUPPORT=y
+ # CONFIG_EFI_LOADER is not set
+ # CONFIG_BOOTSTD is not set
+ CONFIG_AUTOBOOT_MENU_SHOW=y
+diff -uprN a/configs/mt7988_spim_nand_ubi_rfb_defconfig b/configs/mt7988_spim_nand_ubi_rfb_defconfig
+--- a/configs/mt7988_spim_nand_ubi_rfb_defconfig	2026-01-23 14:28:56.000000000 +0800
++++ b/configs/mt7988_spim_nand_ubi_rfb_defconfig	2026-10-08 18:04:45.423150957 +0800
+@@ -21,6 +21,12 @@ CONFIG_MTK_WGET=y
+ CONFIG_MTK_DEFAULT_FIT_BOOT_CONF="mt7988a-rfb-spim-nand"
+ CONFIG_MTK_UPGRADE_BL2_VERIFY=y
+ CONFIG_MTK_UPGRADE_FIP_VERIFY=y
++CONFIG_MTK_DUAL_BOOT=y
++CONFIG_MTK_DUAL_BOOT_ITB_IMAGE=y
++CONFIG_MTK_DUAL_BOOT_ENABLE_RETRY=y
++CONFIG_MTK_DUAL_BOOT_MAX_RETRY_COUNT=3
++CONFIG_MTK_DUAL_BOOT_SLOT_1_FIRMWARE_NAME="firmware2"
++CONFIG_MTK_BSPCONF_SUPPORT=y
+ CONFIG_AUTOBOOT_MENU_SHOW=y
+ CONFIG_AUTOBOOT_MENU_MTK_SHOW=y
+ CONFIG_DEFAULT_FDT_FILE="mt7988-spim-nand-rfb"
