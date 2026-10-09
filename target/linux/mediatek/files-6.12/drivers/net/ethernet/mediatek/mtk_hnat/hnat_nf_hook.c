@@ -4030,8 +4030,15 @@ static unsigned int mtk_hnat_nf_post_routing(
 
 	switch (skb_hnat_reason(skb)) {
 	case TCP_FIN_SYN_RST:
-		if (hnat_fin_callback && entry->bfib1.state == FIN &&
-		    IS_HNAT_API_SUPPORTED(entry))
+		/* only FIN/RST alerts matter */
+		if (entry_hnat_state(entry) != FIN)
+			break;
+
+		/* Get the last MIB delta before FIN_AGE reclaims the entry. */
+		if (hnat_priv->data->per_flow_accounting)
+			hnat_get_count(hnat_priv, skb_hnat_ppe(skb), skb_hnat_entry(skb), NULL);
+
+		if (hnat_fin_callback && IS_HNAT_API_SUPPORTED(entry))
 			hnat_trigger_callback(hnat_fin_callback, skb);
 		break;
 	case HIT_UNBIND:

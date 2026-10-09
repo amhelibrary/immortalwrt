@@ -1150,7 +1150,8 @@ static int hnat_hw_init(u32 ppe_id)
 		    BIT_IPV4_NAT_EN | BIT_IPV4_NAPT_EN |
 		    BIT_IPV4_NAT_FRAG_EN |
 		    BIT_IPV4_DSL_EN | BIT_IPV6_6RD_EN |
-		    BIT_IPV6_3T_ROUTE_EN | BIT_IPV6_5T_ROUTE_EN);
+		    BIT_IPV6_3T_ROUTE_EN | BIT_IPV6_5T_ROUTE_EN |
+		    BIT_ALERT_TCP_FIN_RST_SYN);
 
 	if (hnat_priv->data->version == MTK_HNAT_V2 ||
 	    hnat_priv->data->version == MTK_HNAT_V3)
@@ -1393,7 +1394,8 @@ static void hnat_stop(u32 ppe_id)
 		    BIT_IPV4_NAPT_EN | BIT_IPV4_NAT_EN |
 		    BIT_IPV4_NAT_FRAG_EN | BIT_IPV4_DSL_EN |
 		    BIT_IPV6_6RD_EN | BIT_IPV6_3T_ROUTE_EN |
-		    BIT_IPV6_5T_ROUTE_EN | BIT_MD_TOAP_BYP_CRSN1 | BIT_MD_TOAP_BYP_CRSN0);
+		    BIT_IPV6_5T_ROUTE_EN | BIT_MD_TOAP_BYP_CRSN1 |
+		    BIT_MD_TOAP_BYP_CRSN0 | BIT_ALERT_TCP_FIN_RST_SYN);
 
 	if (hnat_priv->data->version == MTK_HNAT_V2 ||
 	    hnat_priv->data->version == MTK_HNAT_V3)

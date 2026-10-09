@@ -226,15 +226,6 @@
 /* PPE Cache Debug status Mask */
 #define CAH_DBG_BUSY (0xf << 0)
 
-/* If user wants to change default FOE entry number, both DEF_ETRY_NUM and
- * DEF_ETRY_NUM_CFG need to be modified.
- */
-#define DEF_ETRY_NUM		8192
-/* feasible values : 32768, 16384, 8192, 4096, 2048, 1024 */
-#define DEF_ETRY_NUM_CFG	TABLE_8K
-/* corresponding values : TABLE_32K, TABLE_16K, TABLE_8K, TABLE_4K, TABLE_2K,
- * TABLE_1K
- */
 /* default binding threshold: 30 packets per second */
 #define DEF_BIND_THRESHOLD	30
 #define DEF_TCP_DLTA		7
@@ -259,8 +250,19 @@
 #define CFG_PPE_BIND_THRESHOLD	(hnat_priv->bind_threshold)
 
 #if defined(CONFIG_MEDIATEK_NETSYS_V2) || defined(CONFIG_MEDIATEK_NETSYS_V3)
+/* If user wants to change default FOE entry number, both DEF_ETRY_NUM and
+ * DEF_ETRY_NUM_CFG need to be modified.
+ */
+#define DEF_ETRY_NUM		32768
+/* feasible values : 32768, 16384, 8192, 4096, 2048, 1024 */
+#define DEF_ETRY_NUM_CFG	TABLE_32K
+/* corresponding values : TABLE_32K, TABLE_16K, TABLE_8K, TABLE_4K, TABLE_2K,
+ * TABLE_1K
+ */
 #define MAX_PPE_CACHE_NUM	(128)
 #else
+#define DEF_ETRY_NUM		8192
+#define DEF_ETRY_NUM_CFG	TABLE_8K
 #define MAX_PPE_CACHE_NUM	(32)
 #endif
 

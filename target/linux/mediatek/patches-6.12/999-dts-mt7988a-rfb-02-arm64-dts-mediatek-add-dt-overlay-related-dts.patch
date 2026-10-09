@@ -1,11 +1,14 @@
 ---
-[v6] arm64: dts: mediatek: add dt overlay related dts
+[v7] arm64: dts: mediatek: add dt overlay related dts
 
 Add device tree overlay support for MT7988A RFB with various Ethernet PHY
 configurations including AN8831X, AN8855, AQR113C, CUX3410, interal 2.5G PHYs,
 and MXL86252 switch. Enables flexible hardware configuration through
 runtime DTS overlays.
 ---
+v7: Add 'managed = "in-band-status"' to the relevant AN8831X DTSO, allowing
+    AN8831X to activate INBAND after new driver supports inband_caps and
+    config_inband callbacks.
 v6: Disable 2.5G/5G EEE modes for Aquantia 10G PHY.
 v5: Move Wi-Fi nodes to separate DTSOs
 v4: Add a device tree overlay for the new mt7988a-mxl86252-rfb (MTK-5197) to
@@ -19,7 +22,7 @@ v1: Move openwrt-master files to openwrt-25.12 branch after OpenWrt official
 
 --- /dev/null
 +++ b/arch/arm64/boot/dts/mediatek/mt7988a-rfb-eth1-an8831x.dtso
-@@ -0,0 +1,71 @@
+@@ -0,0 +1,72 @@
 +// SPDX-License-Identifier: (GPL-2.0 OR MIT)
 +/*
 + * Copyright (C) 2022 MediaTek Inc.
@@ -75,6 +78,7 @@ v1: Move openwrt-master files to openwrt-25.12 branch after OpenWrt official
 +	fragment@1 {
 +		target = <&gmac1>;
 +		__overlay__ {
++			managed = "in-band-status";
 +			phy-mode = "usxgmii";
 +			phy-connection-type = "usxgmii";
 +			phy = <&phy28>;
@@ -162,7 +166,7 @@ v1: Move openwrt-master files to openwrt-25.12 branch after OpenWrt official
 +};
 --- /dev/null
 +++ b/arch/arm64/boot/dts/mediatek/mt7988a-rfb-eth1-sfp-an8831x.dtso
-@@ -0,0 +1,117 @@
+@@ -0,0 +1,119 @@
 +// SPDX-License-Identifier: (GPL-2.0 OR MIT)
 +/*
 + * Copyright (C) 2022 MediaTek Inc.
@@ -225,6 +229,7 @@ v1: Move openwrt-master files to openwrt-25.12 branch after OpenWrt official
 +						phy-mode = "usxgmii";
 +						phy-connection-type = "usxgmii";
 +						phy-handle = <&phy28>;
++						managed = "in-band-status";
 +					};
 +				};
 +			};
@@ -272,6 +277,7 @@ v1: Move openwrt-master files to openwrt-25.12 branch after OpenWrt official
 +	fragment@4 {
 +		target = <&gmac1>;
 +		__overlay__ {
++			managed = "in-band-status";
 +			phy-mode = "usxgmii";
 +			phy-connection-type = "usxgmii";
 +			phy = <&phy28>;
@@ -384,7 +390,7 @@ v1: Move openwrt-master files to openwrt-25.12 branch after OpenWrt official
 +
 --- /dev/null
 +++ b/arch/arm64/boot/dts/mediatek/mt7988a-rfb-eth2-an8831x.dtso
-@@ -0,0 +1,71 @@
+@@ -0,0 +1,72 @@
 +// SPDX-License-Identifier: (GPL-2.0 OR MIT)
 +/*
 + * Copyright (C) 2022 MediaTek Inc.
@@ -440,6 +446,7 @@ v1: Move openwrt-master files to openwrt-25.12 branch after OpenWrt official
 +	fragment@1 {
 +		target = <&gmac2>;
 +		__overlay__ {
++			managed = "in-band-status";
 +			phy-mode = "usxgmii";
 +			phy-connection-type = "usxgmii";
 +			phy = <&phy24>;
@@ -526,7 +533,7 @@ v1: Move openwrt-master files to openwrt-25.12 branch after OpenWrt official
 +};
 --- /dev/null
 +++ b/arch/arm64/boot/dts/mediatek/mt7988a-rfb-eth2-mxl86252-an8831x.dtso
-@@ -0,0 +1,168 @@
+@@ -0,0 +1,169 @@
 +// SPDX-License-Identifier: (GPL-2.0 OR MIT)
 +/*
 + * Copyright (C) 2022 MediaTek Inc.
@@ -646,6 +653,7 @@ v1: Move openwrt-master files to openwrt-25.12 branch after OpenWrt official
 +					port6: port@6 {
 +						reg = <12>;
 +						label = "mxl_lan5";
++						managed = "in-band-status";
 +						phy-mode = "usxgmii";
 +						phy-handle = <&phy24>;
 +						status = "okay";

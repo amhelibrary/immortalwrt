@@ -170,6 +170,7 @@ struct hnat_desc {
 #define is_unreserved_port(hdr)						       \
 	((ntohs(hdr->source) > 1023) && (ntohs(hdr->dest) > 1023))
 
+#define MODEM_TO_CPU 0x0
 #define TTL_0 0x02
 #define HAS_OPTION_HEADER 0x03
 #define NO_FLOW_IS_ASSIGNED 0x07
@@ -195,6 +196,7 @@ struct hnat_desc {
 #define HIT_PRE_BIND 0x1A
 #define HIT_BIND_PACKET_SAMPLING 0x1B
 #define HIT_BIND_EXCEED_MTU 0x1C
+#define PKT_FWD_WITHOUT_PPE 0x1E
 #define IPVERSION_V4 0x04
 #define IPVERSION_V6 0x06
 

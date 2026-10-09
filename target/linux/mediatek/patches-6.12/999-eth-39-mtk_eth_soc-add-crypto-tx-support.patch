@@ -5,6 +5,7 @@ Add cryptographic TX support for IPsec ESP tunnels on NETSYSv3. This enables
 hardware offload for IPsec encryption via EIP197 engine, with proper descriptor
 handling for crypto DMA transport and tunnel metadata.
 ---
+v5: Add RX_DMA_GET_TOPS_ENTRY, TOPS_ENTRY_PPE_UN_HIT for PPE cpu reason recoveration.
 v4: Add pppoe flag in mtk_tnl_desc.
 v3: Add extra QDMA path after EIP197 SW inline encryption.
 v2: Add txd info for IPSec inline mode in gro frag_list processing.
@@ -106,7 +107,7 @@ v1: Refactor and decouple crypto TX with NF_HNAT driver.
  #define TX_DMA_FPORT_SHIFT_V2	8
  #define TX_DMA_FPORT_MASK_V2	0xf
  #define TX_DMA_SWC_V2		BIT(30)
-@@ -544,6 +553,10 @@
+@@ -544,6 +553,12 @@
  /* PDMA V2 descriptor rxd6 */
  #define RX_DMA_GET_FLUSH_RSN_V2	GENMASK(2, 0)
  #define RX_DMA_GET_AGG_CNT_V2	GENMASK(23, 16)
@@ -114,10 +115,12 @@ v1: Refactor and decouple crypto TX with NF_HNAT driver.
 +
 +/* PDMA V2 descriptor rxd7 */
 +#define RX_DMA_GET_CDRT(x)	(((x) >> 8) & 0xff)
++#define RX_DMA_GET_TOPS_ENTRY(x)	((x) & 0x3f)
++#define TOPS_ENTRY_PPE_UN_HIT		25
  
  /* PHY Polling and SMI Master Control registers */
  #define MTK_PPSC		0x10000
-@@ -1527,6 +1540,9 @@ struct mtk_tx_dma_desc_info {
+@@ -1527,6 +1542,9 @@ struct mtk_tx_dma_desc_info {
  	u32		size;
  	u16		vlan_tci;
  	u16		qid;

@@ -6,8 +6,8 @@ Subject: [PATCH] net: ethernet: mtk_eth_soc: add mtkhnat driver support
 ---
  drivers/net/ethernet/mediatek/Kconfig       | 24 +++++++++++++
  drivers/net/ethernet/mediatek/Makefile      |  1 +
- drivers/net/ethernet/mediatek/mtk_eth_soc.c | 39 +++++++++++++++++++++
- 3 files changed, 64 insertions(+)
+ drivers/net/ethernet/mediatek/mtk_eth_soc.c | 61 +++++++++++++++++++++++++++++++
+ 3 files changed, 86 insertions(+)
 
 --- a/drivers/net/ethernet/mediatek/Kconfig
 +++ b/drivers/net/ethernet/mediatek/Kconfig
@@ -60,7 +60,7 @@ Subject: [PATCH] net: ethernet: mtk_eth_soc: add mtkhnat driver support
  static int mtk_msg_level = -1;
  module_param_named(msg_level, mtk_msg_level, int, 0);
  MODULE_PARM_DESC(msg_level, "Message level (-1=defaults,0=none,...,16=all)");
-@@ -2954,6 +2958,32 @@ static int mtk_poll_rx(struct napi_struc
+@@ -2954,6 +2958,53 @@ static int mtk_poll_rx(struct napi_struc
  
  			skb_reserve(skb, NET_SKB_PAD + NET_IP_ALIGN);
  			skb_put(skb, pktlen);
@@ -86,6 +86,27 @@ Subject: [PATCH] net: ethernet: mtk_eth_soc: add mtkhnat driver support
 +				skb->pkt_type = PACKET_HOST;
 +			}
 +
++			/* With slow path rate limit enabled, packets take
++			 * PPE->NPU->QDMA->ADMA, where QDMA overwrites the PPE CPU
++			 * reason with 0x1E, so the NPU re-encodes the original one:
++			 * UN_HIT in TOPS_ENTRY, and any reason other than HIT_UNBIND/
++			 * HIT_UNBIND_RATE_REACH as entry 0x7FFF (no hash entry).
++			 * HIT_UNBIND and HIT_UNBIND_RATE_REACH are thus no longer
++			 * distinguishable, so binding cannot wait for the rate to be
++			 * reached. Keep-alive does not go through QDMA, but its reason
++			 * is set to MODEM_TO_CPU to avoid hanging the CDM.
++			 */
++			if (eth->soc->caps == MT7988_CAPS) {
++				if (skb_hnat_reason(skb) == PKT_FWD_WITHOUT_PPE) {
++					if (RX_DMA_GET_TOPS_ENTRY(trxd.rxd7) == TOPS_ENTRY_PPE_UN_HIT)
++						skb_hnat_reason(skb) = UN_HIT;
++					else if (skb_hnat_entry(skb) != 0x7FFF)
++						skb_hnat_reason(skb) = HIT_UNBIND_RATE_REACH;
++				} else if (skb_hnat_reason(skb) == MODEM_TO_CPU) {
++					skb_hnat_reason(skb) = HIT_BIND_KEEPALIVE_DUP_OLD_HDR;
++				}
++			}
++
 +			trace_printk("[%s] rxd:(entry=%x,sport=%x,reason=%x,alg=%x\n",
 +				     __func__, skb_hnat_entry(skb), skb_hnat_sport(skb),
 +				     skb_hnat_reason(skb), skb_hnat_alg(skb));
@@ -93,7 +114,7 @@ Subject: [PATCH] net: ethernet: mtk_eth_soc: add mtkhnat driver support
  		}
  
  		skb->dev = netdev;
-@@ -2996,8 +3026,10 @@ static int mtk_poll_rx(struct napi_struc
+@@ -2996,8 +3047,10 @@ static int mtk_poll_rx(struct napi_struc
  				skb_dst_set_noref(skb, &eth->dsa_meta[port]->dst);
  		}
  
@@ -104,7 +125,7 @@ Subject: [PATCH] net: ethernet: mtk_eth_soc: add mtkhnat driver support
  
  		if (eth->hwlro && eth->debugfs->hwlro_stats.ebl &&
  		    IS_HW_LRO_RING(ring->ring_no)) {
-@@ -4763,8 +4795,10 @@ static int mtk_open(struct net_device *d
+@@ -4763,8 +4816,10 @@ static int mtk_open(struct net_device *d
  		if (err)
  			return err;
  
@@ -115,7 +136,7 @@ Subject: [PATCH] net: ethernet: mtk_eth_soc: add mtkhnat driver support
  
  		for (i = 0; i < MTK_MAX_DEVS; i++) {
  			if (!eth->netdev[i])
-@@ -4938,8 +4972,10 @@ static int mtk_stop(struct net_device *d
+@@ -4938,8 +4993,10 @@ static int mtk_stop(struct net_device *d
  
  	mtk_dma_free(eth);
  
@@ -126,7 +147,7 @@ Subject: [PATCH] net: ethernet: mtk_eth_soc: add mtkhnat driver support
  
  	return 0;
  }
-@@ -7581,6 +7617,7 @@ static int mtk_probe(struct platform_dev
+@@ -7581,6 +7638,7 @@ static int mtk_probe(struct platform_dev
  		};
  	}
  
@@ -134,7 +155,7 @@ Subject: [PATCH] net: ethernet: mtk_eth_soc: add mtkhnat driver support
  	if (eth->soc->offload_version) {
  		u8 ppe_num = eth->soc->ppe_num;
  
-@@ -7605,6 +7642,7 @@ static int mtk_probe(struct platform_dev
+@@ -7605,6 +7663,7 @@ static int mtk_probe(struct platform_dev
  		if (err)
  			goto err_deinit_ppe;
  	}
@@ -142,7 +163,7 @@ Subject: [PATCH] net: ethernet: mtk_eth_soc: add mtkhnat driver support
  
  	mtk_eth_debugfs_init(eth);
  
-@@ -7671,7 +7709,9 @@ err_unreg_netdev:
+@@ -7671,7 +7730,9 @@ err_unreg_netdev:
  	free_netdev(eth->dummy_dev);
  err_deinit_ppe:
  	mtk_napi_del(eth);
