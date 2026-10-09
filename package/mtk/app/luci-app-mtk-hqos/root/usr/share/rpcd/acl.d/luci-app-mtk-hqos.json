@@ -1,6 +1,6 @@
 {
 	"luci-app-mtk-hqos": {
-		"description": "Grant access for MediaTek Hardware QoS",
+		"description": "Grant access to MediaTek Hardware QoS",
 		"read": {
 			"cgi-io": [ "exec" ],
 			"file": {
