@@ -1,0 +1,10 @@
+--- a/drivers/net/dsa/mt7530.c
++++ b/drivers/net/dsa/mt7530.c
+@@ -2280,4 +2280,4 @@ mt7530_setup_mdio(struct mt7530_priv *pr
+ 
+ 	bus->priv = priv;
+-	bus->name = KBUILD_MODNAME "-mii";
+-	snprintf(bus->id, MII_BUS_ID_SIZE, KBUILD_MODNAME "-%d", idx++);
++	bus->name = "mt7530-mii";
++	snprintf(bus->id, MII_BUS_ID_SIZE, "mt7530-%d", idx++);
+ 	bus->read = mt753x_phy_read_c22;
