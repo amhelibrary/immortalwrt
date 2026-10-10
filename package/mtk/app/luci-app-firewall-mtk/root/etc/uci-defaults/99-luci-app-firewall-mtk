@@ -1,0 +1,6 @@
+#!/bin/sh
+
+/etc/init.d/mtk-hnat-rate enable
+/etc/init.d/mtk-hnat-rate start
+
+exit 0

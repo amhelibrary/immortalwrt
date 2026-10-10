@@ -1,0 +1,34 @@
+#!/bin/sh /etc/rc.common
+# SPDX-License-Identifier: GPL-2.0-only
+#
+# MediaTek HNAT binding rate applicator
+#
+
+START=99
+USE_PROCD=1
+NAME=mtk-hnat-rate
+
+apply_hnat_rate() {
+	local hw_offload hnat_rate module
+
+	hw_offload=$(uci -q get firewall.@defaults[0].flow_offloading_hw)
+	[ "$hw_offload" != "1" ] && return 0
+
+	hnat_rate=$(uci -q get firewall.@defaults[0].hnat_bind_rate)
+	[ -z "$hnat_rate" ] && hnat_rate=$(uci -q get firewall.@defaults[0].bind_rate)
+	[ -z "$hnat_rate" ] && hnat_rate=30
+
+	for module in hnat mtk_ppe; do
+		if [ -e "/sys/kernel/debug/${module}/hnat_setting" ]; then
+			echo "1 $hnat_rate" > "/sys/kernel/debug/${module}/hnat_setting" 2>/dev/null
+		fi
+	done
+}
+
+start_service() {
+	apply_hnat_rate
+}
+
+service_triggers() {
+	procd_add_reload_trigger "firewall"
+}
