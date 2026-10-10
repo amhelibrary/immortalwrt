@@ -1,0 +1,418 @@
+From: ImmortalWrt Developer <developer@immortalwrt.org>
+Subject: [PATCH] net: ethernet: mediatek: hnat: sync MIB accounting to physical, DSA, and virtual interfaces
+
+Currently, when hardware flow offloading (HNAT) is active, traffic statistics
+(bytes and packets) are accounted inside the PPE hardware MIB counters. However,
+these statistics are not reported to Linux network devices (DSA user ports such
+as wan/lan1~lan4, bridge devices such as br-lan/br-wan, and virtual interfaces),
+leaving their ifconfig / /proc/net/dev counters near zero while eth0 accumulates
+all raw MAC bytes. Furthermore, bandwidth monitoring tools relying on
+nf_conntrack accounting (e.g. nlbwmon) receive no accounting updates for offloaded flows.
+
+This patch fixes the issue by:
+1. Recording both primary/physical interface and upper/virtual/bridge interface
+   indices (iif, oif, iif_vif, oif_vif) upon flow binding in skb_to_hnat_info().
+2. Supporting ndo_flow_offload_stats64_add, per-CPU sw netstats (dev->tstats used
+   by DSA user ports and bridges), and standard dev->stats in hnat_update_dev_stats().
+3. Updating both ingress interface(s) (as RX) and egress interface(s) (as TX)
+   with MIB deltas in hnat_vif_acct_update().
+4. Adding a periodic background delayed workqueue in hnat.c running every 1s
+   to poll MIB deltas from hardware for active bound flows and update both
+   interfaces and nf_conntrack.
+5. Enabling nf_stat_en by default so nf_conntrack counters are updated for
+   monitoring tools such as nlbwmon.
+6. Adding spinlock protection around hardware PPE MIB search registers to
+   prevent race conditions between background polling and softirq callbacks.
+
+Signed-off-by: ImmortalWrt Developer <developer@immortalwrt.org>
+---
+--- a/drivers/net/ethernet/mediatek/mtk_hnat/hnat.h
++++ b/drivers/net/ethernet/mediatek/mtk_hnat/hnat.h
+@@ -978,6 +978,8 @@
+ 	struct nf_conntrack_zone zone;
+ 	int iif; /* ingress device ifindex */
+ 	int oif; /* egress device ifindex */
++	int iif_vif; /* ingress virtual/bridge device ifindex */
++	int oif_vif; /* egress virtual/bridge device ifindex */
+ };
+ 
+ enum mtk_hnat_version {
+
+--- a/drivers/net/ethernet/mediatek/mtk_hnat/hnat_debugfs.c
++++ b/drivers/net/ethernet/mediatek/mtk_hnat/hnat_debugfs.c
+@@ -1100,20 +1100,25 @@
+ 	[10] = set_default_cpu_port,
+ };
+ 
++static DEFINE_SPINLOCK(mib_read_lock);
++
+ static int read_mib(struct mtk_hnat *h, u32 ppe_id,
+ 	     u32 index, u64 *bytes, u64 *packets)
+ {
+ 	int ret;
+ 	u32 val, cnt_r0, cnt_r1, cnt_r2, cnt_r3;
++	unsigned long flags;
+ 
+ 	if (ppe_id >= CFG_PPE_NUM)
+ 		return -EINVAL;
+ 
++	spin_lock_irqsave(&mib_read_lock, flags);
+ 	writel(index | (1 << 16), h->ppe_base[ppe_id] + PPE_MIB_SER_CR);
+ 	ret = readx_poll_timeout_atomic(readl, h->ppe_base[ppe_id] + PPE_MIB_SER_CR, val,
+ 					!(val & BIT_MIB_BUSY), 20, 10000);
+ 
+ 	if (ret < 0) {
++		spin_unlock_irqrestore(&mib_read_lock, flags);
+ 		pr_notice("mib busy, please check later\n");
+ 		return ret;
+ 	}
+@@ -1130,9 +1135,38 @@
+ 		*packets = ((cnt_r1 & 0xffff0000) >> 16) +
+ 			   ((u64)(cnt_r2 & 0xffffff) << 16);
+ 	}
++	spin_unlock_irqrestore(&mib_read_lock, flags);
+ 
+ 	return 0;
++}
++
++static void hnat_update_dev_stats(struct net_device *dev,
++				  const struct rtnl_link_stats64 *stats64)
++{
++	if (!dev)
++		return;
++
++	if (dev->netdev_ops && dev->netdev_ops->ndo_flow_offload_stats64_add) {
++		dev->netdev_ops->ndo_flow_offload_stats64_add(dev, stats64);
++		return;
++	}
++
++	if (dev->tstats) {
++		struct pcpu_sw_netstats *tstats = this_cpu_ptr(dev->tstats);
+ 
++		u64_stats_update_begin(&tstats->syncp);
++		u64_stats_add(&tstats->rx_packets, stats64->rx_packets);
++		u64_stats_add(&tstats->rx_bytes, stats64->rx_bytes);
++		u64_stats_add(&tstats->tx_packets, stats64->tx_packets);
++		u64_stats_add(&tstats->tx_bytes, stats64->tx_bytes);
++		u64_stats_update_end(&tstats->syncp);
++		return;
++	}
++
++	dev->stats.rx_packets += stats64->rx_packets;
++	dev->stats.rx_bytes += stats64->rx_bytes;
++	dev->stats.tx_packets += stats64->tx_packets;
++	dev->stats.tx_bytes += stats64->tx_bytes;
+ }
+ 
+ static void hnat_vif_acct_update_dev(int ifindex,
+@@ -1140,15 +1174,13 @@
+ {
+ 	struct net_device *dev;
+ 
+-	rcu_read_lock();
++	if (!ifindex)
++		return;
+ 
++	rcu_read_lock();
+ 	dev = dev_get_by_index_rcu(&init_net, ifindex);
+-	if (!dev)
+-		goto out_unlock;
+-
+-	if (dev->netdev_ops->ndo_flow_offload_stats64_add)
+-		dev->netdev_ops->ndo_flow_offload_stats64_add(dev, stats64);
+-out_unlock:
++	if (dev)
++		hnat_update_dev_stats(dev, stats64);
+ 	rcu_read_unlock();
+ }
+ 
+@@ -1160,17 +1192,26 @@
+ 	struct rtnl_link_stats64 tx_stats = { .tx_packets = packets,
+ 					      .tx_bytes = bytes };
+ 	struct hnat_accounting *acct;
+-	int iif, oif;
++	int iif, oif, iif_vif, oif_vif;
++
++	if (!bytes && !packets)
++		return;
+ 
+ 	acct = &h->acct[ppe_id][index];
+ 	iif = READ_ONCE(acct->iif);
+ 	oif = READ_ONCE(acct->oif);
++	iif_vif = READ_ONCE(acct->iif_vif);
++	oif_vif = READ_ONCE(acct->oif_vif);
+ 
+ 	if (iif)
+ 		hnat_vif_acct_update_dev(iif, &rx_stats);
++	if (iif_vif && iif_vif != iif)
++		hnat_vif_acct_update_dev(iif_vif, &rx_stats);
+ 
+ 	if (oif)
+ 		hnat_vif_acct_update_dev(oif, &tx_stats);
++	if (oif_vif && oif_vif != oif)
++		hnat_vif_acct_update_dev(oif_vif, &tx_stats);
+ }
+ 
+ static int hnat_nf_acct_update(struct mtk_hnat *h, u32 ppe_id,
+
+--- a/drivers/net/ethernet/mediatek/mtk_hnat/hnat_nf_hook.c
++++ b/drivers/net/ethernet/mediatek/mtk_hnat/hnat_nf_hook.c
+@@ -1251,8 +1251,9 @@
+ {
+ 	struct hnat_accounting *acct;
+ 	struct foe_entry *entry;
++	struct net_device *dev;
+ 
+-	if (!skb->dev || netif_is_bridge_master(skb->dev))
++	if (!skb->dev)
+ 		return;
+ 
+ 	if (!skb_hnat_is_hashed(skb) || skb_hnat_ppe(skb) >= CFG_PPE_NUM)
+@@ -1261,9 +1262,27 @@
+ 	entry = &hnat_priv->foe_table_cpu[skb_hnat_ppe(skb)][skb_hnat_entry(skb)];
+ 	acct = &hnat_priv->acct[skb_hnat_ppe(skb)][skb_hnat_entry(skb)];
+ 
+-	/* save iface index for virtual device counter update */
+-	if (entry_hnat_is_bound(entry))
+-		cmpxchg(is_ingress ? &acct->iif : &acct->oif, 0, skb->dev->ifindex);
++	/* save iface index for counter update */
++	if (entry_hnat_is_bound(entry)) {
++		dev = skb->dev;
++		if (is_ingress) {
++			if (!acct->iif)
++				acct->iif = dev->ifindex;
++			if (netdev_master_upper_dev_get_rcu(dev)) {
++				struct net_device *br = netdev_master_upper_dev_get_rcu(dev);
++				if (!acct->iif_vif)
++					acct->iif_vif = br->ifindex;
++			}
++		} else {
++			if (!acct->oif)
++				acct->oif = dev->ifindex;
++			if (netdev_master_upper_dev_get_rcu(dev)) {
++				struct net_device *br = netdev_master_upper_dev_get_rcu(dev);
++				if (!acct->oif_vif)
++					acct->oif_vif = br->ifindex;
++			}
++		}
++	}
+ }
+ 
+ static unsigned int
+@@ -2369,9 +2388,16 @@
+ 
+ 	if (hnat_priv->data->per_flow_accounting &&
+ 	    skb_hnat_entry(skb) < hnat_priv->foe_etry_num &&
+-	    skb_hnat_ppe(skb) < CFG_PPE_NUM)
+-		memset(&hnat_priv->acct[skb_hnat_ppe(skb)][skb_hnat_entry(skb)],
+-		       0, sizeof(struct hnat_accounting));
++	    skb_hnat_ppe(skb) < CFG_PPE_NUM) {
++		struct hnat_accounting *acct = &hnat_priv->acct[skb_hnat_ppe(skb)][skb_hnat_entry(skb)];
++		int iif = acct->iif, oif = acct->oif, iif_vif = acct->iif_vif, oif_vif = acct->oif_vif;
++
++		memset(acct, 0, sizeof(struct hnat_accounting));
++		acct->iif = iif;
++		acct->oif = oif;
++		acct->iif_vif = iif_vif;
++		acct->oif_vif = oif_vif;
++	}
+ 
+ 	return 0;
+ }
+@@ -2416,6 +2442,7 @@
+ }
+ 
+ static int skb_to_hnat_info(struct sk_buff *skb,
++			    const struct net_device *in,
+ 			    const struct net_device *dev,
+ 			    struct foe_entry *foe,
+ 			    struct flow_offload_hw_path *hw_path)
+@@ -3245,11 +3272,38 @@
+ 	if (hnat_priv->data->per_flow_accounting &&
+ 	    skb_hnat_entry(skb) < hnat_priv->foe_etry_num &&
+ 	    skb_hnat_ppe(skb) < CFG_PPE_NUM) {
+-		memset(&hnat_priv->acct[skb_hnat_ppe(skb)][skb_hnat_entry(skb)],
+-		       0, sizeof(struct hnat_accounting));
++		struct hnat_accounting *acct = &hnat_priv->acct[skb_hnat_ppe(skb)][skb_hnat_entry(skb)];
++
++		memset(acct, 0, sizeof(struct hnat_accounting));
+ 		ct = nf_ct_get(skb, &ctinfo);
+ 		if (ct)
+-			hnat_priv->acct[skb_hnat_ppe(skb)][skb_hnat_entry(skb)].zone = ct->zone;
++			acct->zone = ct->zone;
++
++		if (in) {
++			if (netif_is_bridge_master((struct net_device *)in)) {
++				acct->iif_vif = in->ifindex;
++				acct->iif = (skb->dev && skb->dev != in) ? skb->dev->ifindex : in->ifindex;
++			} else if (netdev_master_upper_dev_get_rcu((struct net_device *)in)) {
++				struct net_device *br = netdev_master_upper_dev_get_rcu((struct net_device *)in);
++				acct->iif_vif = br->ifindex;
++				acct->iif = in->ifindex;
++			} else {
++				acct->iif = in->ifindex;
++			}
++		} else if (skb->dev) {
++			acct->iif = skb->dev->ifindex;
++		}
++
++		if (hw_path->virt_dev && hw_path->virt_dev != hw_path->dev) {
++			acct->oif_vif = hw_path->virt_dev->ifindex;
++			acct->oif = hw_path->dev ? hw_path->dev->ifindex : dev->ifindex;
++		} else if (netdev_master_upper_dev_get_rcu((struct net_device *)dev)) {
++			struct net_device *br = netdev_master_upper_dev_get_rcu((struct net_device *)dev);
++			acct->oif_vif = br->ifindex;
++			acct->oif = dev->ifindex;
++		} else {
++			acct->oif = dev->ifindex;
++		}
+ 	}
+ 
+ 	return 0;
+@@ -3600,11 +3654,17 @@
+ 
+ 	/* reset statistic for this entry */
+ 	if (hnat_priv->data->per_flow_accounting) {
+-		memset(&hnat_priv->acct[skb_hnat_ppe(skb)][skb_hnat_entry(skb)],
+-			0, sizeof(struct hnat_accounting));
++		struct hnat_accounting *acct = &hnat_priv->acct[skb_hnat_ppe(skb)][skb_hnat_entry(skb)];
++		int iif = acct->iif, oif = acct->oif, iif_vif = acct->iif_vif, oif_vif = acct->oif_vif;
++
++		memset(acct, 0, sizeof(struct hnat_accounting));
++		acct->iif = iif;
++		acct->oif = oif;
++		acct->iif_vif = iif_vif;
++		acct->oif_vif = oif_vif;
+ 		ct = nf_ct_get(skb, &ctinfo);
+ 		if (ct)
+-			hnat_priv->acct[skb_hnat_ppe(skb)][skb_hnat_entry(skb)].zone = ct->zone;
++			acct->zone = ct->zone;
+ 	}
+ 
+ #if defined(CONFIG_MEDIATEK_NETSYS_V3)
+@@ -4060,7 +4120,8 @@
+ }
+ 
+ static unsigned int mtk_hnat_nf_post_routing(
+-	struct sk_buff *skb, const struct net_device *out,
++	struct sk_buff *skb, const struct net_device *in,
++	const struct net_device *out,
+ 	int (*fn)(struct sk_buff *, const struct net_device *,
+ 		  struct flow_offload_hw_path *),
+ 	const char *func)
+@@ -4205,7 +4266,7 @@
+ 				break;
+ 		}
+ 
+-		skb_to_hnat_info(skb, out, entry, &hw_path);
++		skb_to_hnat_info(skb, in, out, entry, &hw_path);
+ 		break;
+ 	case HIT_BIND_KEEPALIVE_DUP_OLD_HDR:
+ 		/* update hnat count to virtual interface/nf_conntrack by keepalive */
+@@ -4335,10 +4396,10 @@
+ 	 * state->out would be changed to bridge dev in br_nf_post_routing.
+ 	 */
+ 	if (netif_is_bridge_master(state->out) && (state->out != skb->dev)) {
+-		if (!mtk_hnat_nf_post_routing(skb, skb->dev, 0, __func__))
++		if (!mtk_hnat_nf_post_routing(skb, state->in, skb->dev, 0, __func__))
+ 			return NF_ACCEPT;
+ 	} else {
+-		if (!mtk_hnat_nf_post_routing(skb, state->out, hnat_ipv6_get_nexthop, __func__))
++		if (!mtk_hnat_nf_post_routing(skb, state->in, state->out, hnat_ipv6_get_nexthop, __func__))
+ 			return NF_ACCEPT;
+ 	}
+ 
+@@ -4368,10 +4429,10 @@
+ 	 * state->out would be changed to bridge dev in br_nf_post_routing.
+ 	 */
+ 	if (netif_is_bridge_master(state->out) && (state->out != skb->dev)) {
+-		if (!mtk_hnat_nf_post_routing(skb, skb->dev, 0, __func__))
++		if (!mtk_hnat_nf_post_routing(skb, state->in, skb->dev, 0, __func__))
+ 			return NF_ACCEPT;
+ 	} else {
+-		if (!mtk_hnat_nf_post_routing(skb, state->out, hnat_ipv4_get_nexthop, __func__))
++		if (!mtk_hnat_nf_post_routing(skb, state->in, state->out, hnat_ipv4_get_nexthop, __func__))
+ 			return NF_ACCEPT;
+ 	}
+ 
+@@ -4458,7 +4519,7 @@
+ 		return NF_ACCEPT;
+ #endif
+ 
+-	if (!mtk_hnat_nf_post_routing(skb, state->out, 0, __func__))
++	if (!mtk_hnat_nf_post_routing(skb, state->in, state->out, 0, __func__))
+ 		return NF_ACCEPT;
+ 
+ drop:
+
+--- a/drivers/net/ethernet/mediatek/mtk_hnat/hnat.c
++++ b/drivers/net/ethernet/mediatek/mtk_hnat/hnat.c
+@@ -31,6 +31,7 @@
+ static struct socket *_hnat_roam_sock;
+ static struct work_struct _hnat_roam_work;
+ static struct delayed_work _hnat_flow_entry_teardown_work;
++static struct delayed_work _hnat_mib_sync_work;
+ 
+ int (*ra_sw_nat_hook_rx)(struct sk_buff *skb) = NULL;
+ EXPORT_SYMBOL(ra_sw_nat_hook_rx);
+@@ -669,6 +670,42 @@
+ 	cancel_delayed_work(&_hnat_flow_entry_teardown_work);
+ }
+ 
++static void hnat_mib_sync_handler(struct work_struct *work)
++{
++	struct mtk_hnat *h = hnat_priv;
++	struct foe_entry *entry;
++	u32 ppe_id, index;
++
++	if (!h || !h->data->per_flow_accounting)
++		return;
++
++	for (ppe_id = 0; ppe_id < CFG_PPE_NUM; ppe_id++) {
++		if (!h->foe_table_cpu[ppe_id])
++			continue;
++
++		for (index = 0; index < h->foe_etry_num; index++) {
++			entry = &h->foe_table_cpu[ppe_id][index];
++			if (!entry_hnat_is_bound(entry))
++				continue;
++
++			hnat_get_count(h, ppe_id, index, NULL);
++		}
++	}
++
++	schedule_delayed_work(&_hnat_mib_sync_work, 1 * HZ);
++}
++
++static void hnat_mib_sync_enable(void)
++{
++	INIT_DELAYED_WORK(&_hnat_mib_sync_work, hnat_mib_sync_handler);
++	schedule_delayed_work(&_hnat_mib_sync_work, 1 * HZ);
++}
++
++static void hnat_mib_sync_disable(void)
++{
++	cancel_delayed_work_sync(&_hnat_mib_sync_work);
++}
++
+ static int is_cah_ctrl_request_done(u32 ppe_id)
+ {
+ 	int count = 1000;
+@@ -1765,7 +1802,9 @@
+ 	if (err)
+ 		pr_info("hnat roaming work fail\n");
+ 
++	hnat_priv->nf_stat_en = true;
+ 	hnat_flow_entry_teardown_enable();
++	hnat_mib_sync_enable();
+ 
+ 	INIT_LIST_HEAD(&hnat_priv->xlat.map_list);
+ 	INIT_LIST_HEAD(&hnat_priv->mcast_blist_list);
+@@ -1794,6 +1833,7 @@
+ 
+ 	hnat_roaming_disable();
+ 	hnat_flow_entry_teardown_disable();
++	hnat_mib_sync_disable();
+ 	unregister_netdevice_notifier(&nf_hnat_netdevice_nb);
+ 	unregister_netevent_notifier(&nf_hnat_netevent_nb);
+ 	hnat_neigh_update_cleanup();
