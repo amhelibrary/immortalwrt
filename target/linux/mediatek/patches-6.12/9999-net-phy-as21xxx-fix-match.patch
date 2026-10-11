@@ -1,0 +1,19 @@
+--- a/drivers/net/phy/as21xxx.c
++++ b/drivers/net/phy/as21xxx.c
+@@ -1494,9 +1494,13 @@ static int aeon_gen1_match_phy_device(st
+ static int aeon_gen2_match_phy_device(struct phy_device *phydev,
+ 				      const struct phy_driver *phydrv)
+ {
++	u32 phy_id;
++
+ 	/* AEONSEMI get pid. */
+-	phydev->phy_id = aeon_gen2_read_pid(phydev);
++	phy_id = aeon_gen2_read_pid(phydev);
+ 
+-	if (phydev->phy_id == PHY_ID_AS22XXX)
++	if (phy_id == PHY_ID_AS22XXX) {
++		phydev->phy_id = phy_id;
+ 		return 1;
++	}
+ 
+ 	return 0;

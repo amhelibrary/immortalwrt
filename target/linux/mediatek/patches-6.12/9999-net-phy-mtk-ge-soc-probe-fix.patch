@@ -1,0 +1,127 @@
+--- a/drivers/net/phy/mediatek/mtk-ge-soc.c	2026-10-11 10:46:20.961655997 +0800
++++ b/drivers/net/phy/mediatek/mtk-ge-soc.c	2026-10-11 17:37:44.938722955 +0800
+@@ -4,6 +4,7 @@
+ #include <linux/mfd/syscon.h>
+ #include <linux/module.h>
+ #include <linux/nvmem-consumer.h>
++#include <linux/of.h>
+ #include <linux/pinctrl/consumer.h>
+ #include <linux/phy.h>
+ #include <linux/regmap.h>
+@@ -1227,18 +1228,20 @@
+ 	cell = nvmem_cell_get(&phydev->mdio.dev, "phy-cal-data");
+ 	if (IS_ERR(cell)) {
+ 		if (PTR_ERR(cell) == -EPROBE_DEFER)
+-			return PTR_ERR(cell);
++			phydev_warn(phydev, "phy-cal-data deferred, skipping calibration for now\n");
+ 		return 0;
+ 	}
+ 
+ 	buf = (u32 *)nvmem_cell_read(cell, &len);
+ 	nvmem_cell_put(cell);
+-	if (IS_ERR(buf))
+-		return PTR_ERR(buf);
++	if (IS_ERR(buf)) {
++		phydev_warn(phydev, "failed to read phy-cal-data efuse, skipping calibration\n");
++		return 0;
++	}
+ 
+ 	if (!buf[0] || !buf[1] || !buf[2] || !buf[3] || len < 4 * sizeof(u32)) {
+-		phydev_err(phydev, "invalid efuse data\n");
+-		ret = -EINVAL;
++		phydev_warn(phydev, "invalid efuse data, skipping calibration\n");
++		ret = 0;
+ 		goto out;
+ 	}
+ 
+@@ -1416,17 +1419,54 @@
+ 	 */
+ 	regmap = syscon_regmap_lookup_by_phandle(np, "mediatek,pio");
+ 	if (IS_ERR(regmap))
+-		return PTR_ERR(regmap);
++		regmap = syscon_regmap_lookup_by_compatible("mediatek,mt7988-pinctrl");
++
++	if (IS_ERR(regmap)) {
++		dev_warn(&phydev->mdio.bus->dev,
++			 "Failed to get mediatek,pio syscon regmap, defaulting bootstrap\n");
++		shared->boottrap = 0;
++		return 0;
++	}
+ 
+ 	ret = regmap_read(regmap, RG_GPIO_MISC_TPBANK0, &reg);
+-	if (ret)
+-		return ret;
++	if (ret) {
++		dev_warn(&phydev->mdio.bus->dev,
++			 "Failed to read TPBANK0 register, defaulting bootstrap\n");
++		shared->boottrap = 0;
++		return 0;
++	}
+ 
+ 	shared->boottrap = FIELD_GET(RG_GPIO_MISC_TPBANK0_BOOTMODE, reg);
+ 
+ 	return 0;
+ }
+ 
++static int mt7988_phy_match_device(struct phy_device *phydev,
++				   const struct phy_driver *phydrv)
++{
++	struct device_node *node;
++
++	if (phydev->phy_id == MTK_GPHY_ID_MT7988)
++		return 1;
++
++	node = dev_of_node(&phydev->mdio.dev);
++	if (node && of_device_is_compatible(node, "ethernet-phy-id03a2.9481"))
++		return 1;
++
++	if (phydev->mdio.bus) {
++		const char *bus_id = phydev->mdio.bus->id;
++		const char *bus_name = phydev->mdio.bus->name;
++
++		if ((bus_id && (!strncmp(bus_id, "mt7530", 6) || !strncmp(bus_id, "mt7531", 6))) ||
++		    (bus_name && (!strncmp(bus_name, "mt7530", 6) || !strncmp(bus_name, "mt7531", 6)))) {
++			if (phydev->mdio.addr <= 3)
++				return 1;
++		}
++	}
++
++	return 0;
++}
++
+ static int mt7988_phy_probe(struct phy_device *phydev)
+ {
+ 	struct mtk_socphy_shared *shared;
+@@ -1436,6 +1476,9 @@
+ 	if (phydev->mdio.addr > 3)
+ 		return -EINVAL;
+ 
++	if (phydev->phy_id != MTK_GPHY_ID_MT7988)
++		phydev->phy_id = MTK_GPHY_ID_MT7988;
++
+ 	err = devm_phy_package_join(&phydev->mdio.dev, phydev, 0,
+ 				    sizeof(struct mtk_socphy_shared));
+ 	if (err)
+@@ -1466,7 +1509,13 @@
+ 	phy_modify_mmd(phydev, MDIO_MMD_VEND1, MTK_PHY_RXADC_CTRL_RG7,
+ 		       MTK_PHY_DA_AD_BUF_BIAS_LP_MASK, 0x3 << 8);
+ 
+-	return mt798x_phy_calibration(phydev);
++	err = mt798x_phy_calibration(phydev);
++	if (err)
++		return err;
++
++	phydev_info(phydev, "probed MediaTek MT7988 PHY\n");
++
++	return 0;
+ }
+ 
+ static int mt7981_phy_probe(struct phy_device *phydev)
+@@ -1552,6 +1601,7 @@
+ 	{
+ 		PHY_ID_MATCH_EXACT(MTK_GPHY_ID_MT7988),
+ 		.name		= "MediaTek MT7988 PHY",
++		.match_phy_device = mt7988_phy_match_device,
+ 		.config_init	= mt798x_phy_config_init,
+ 		.config_intr	= mtk_phy_config_intr,
+ 		.handle_interrupt = mtk_phy_handle_interrupt,
