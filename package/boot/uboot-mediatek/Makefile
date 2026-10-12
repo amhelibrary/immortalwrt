@@ -413,7 +413,7 @@ define U-Boot/mt7988_bananapi_bpi-r4-emmc
   NAME:=BananaPi BPi-R4 EMMC
   BUILD_SUBTARGET:=filogic
   BUILD_DEVICES:=bananapi_bpi-r4
-  UBOOT_CONFIG:=mt7988_emmc_rfb
+  UBOOT_CONFIG:=bananapi_r4_emmc
   UBOOT_IMAGE:=u-boot.fip
   CHAINLOAD_IMAGE:=chainload.img
   GPT_TABLE_IMAGE:=GPT_EMMC_mt798x_itb.bin

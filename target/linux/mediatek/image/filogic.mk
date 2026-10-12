@@ -693,11 +693,18 @@ define Device/bananapi_bpi-r4-common
   KERNEL_INITRAMFS_SUFFIX := -recovery.itb
   ARTIFACTS := \
 	       emmc-gpt.bin emmc-preloader.bin emmc-bl31-uboot.fip \
-	       sdcard.img.gz \
+	       emmc.img.gz sdcard.img.gz \
 	       snand-preloader.bin snand-bl31-uboot.fip
   ARTIFACT/emmc-gpt.bin		:= mt7988-sdmmc-mtk-gpt
   ARTIFACT/emmc-preloader.bin	:= mt7988-bl2 emmc-comb
   ARTIFACT/emmc-bl31-uboot.fip	:= mt7988-bl31-uboot $$(DEVICE_NAME)-emmc
+  ARTIFACT/emmc.img.gz		:= mt7988-sdmmc-mtk-gpt |\
+				   pad-to 17k | mt7988-bl2 emmc-comb |\
+				   pad-to 12M | mt7988-bl31-uboot $$(DEVICE_NAME)-emmc |\
+				$(if $(CONFIG_TARGET_ROOTFS_SQUASHFS),\
+				   pad-to 20M | append-image squashfs-sysupgrade.itb | check-size |\
+				) \
+				  gzip
   ARTIFACT/snand-preloader.bin	:= mt7988-bl2 spim-nand-ubi-comb
   ARTIFACT/snand-bl31-uboot.fip	:= mt7988-bl31-uboot $$(DEVICE_NAME)-snand
   ARTIFACT/sdcard.img.gz	:= mt7988-sdmmc-mtk-gpt |\

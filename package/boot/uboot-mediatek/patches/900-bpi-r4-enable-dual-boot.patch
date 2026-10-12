@@ -61,6 +61,26 @@ diff -uprN a/board/mediatek/common/mtd_helper.c b/board/mediatek/common/mtd_help
  }
  
  int boot_from_mtd(struct mtd_info *mtd, u64 offset, bool do_boot)
+diff -uprN a/board/mediatek/Kconfig b/board/mediatek/Kconfig
+--- a/board/mediatek/Kconfig	2026-01-23 14:28:56.000000000 +0800
++++ b/board/mediatek/Kconfig	2026-10-12 18:04:45.000000000 +0800
+@@ -400,6 +400,7 @@ endif # MTK_FW_ENCRYPT
+ 
+ menuconfig MTK_DUAL_BOOT
+ 	bool "Enable A/B System Updates"
++	select MTK_BSPCONF_SUPPORT
+ 	help
+ 	  A/B system updates ensure a workable booting system remains on the
+ 	  flash device during an firmware upgrading.
+@@ -553,7 +554,7 @@ endif # MTK_DUAL_BOOT
+ if ARCH_MEDIATEK
+ 
+ config MTK_BSPCONF_SUPPORT
+-	bool
++	bool "Support for MediaTek BSP configuration"
+ 	help
+ 	  This feature is used to store configurations used by MediaTek BSP.
+ 	  (e.g. Dual FIP)
 diff -uprN a/configs/bananapi_r4_sd_defconfig b/configs/bananapi_r4_sd_defconfig
 --- a/configs/bananapi_r4_sd_defconfig	2026-09-19 15:36:42.733660653 +0800
 +++ b/configs/bananapi_r4_sd_defconfig	2026-10-08 18:04:45.423150957 +0800
