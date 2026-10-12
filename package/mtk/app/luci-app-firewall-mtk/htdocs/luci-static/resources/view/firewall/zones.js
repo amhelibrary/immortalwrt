@@ -104,8 +104,6 @@ return view.extend({
 		o.placeholder = '30';
 		o.default = '30';
 		o.rmempty = false;
-		for (let i = 0; i <= 30; i++)
-			o.value(String(i));
 		o.depends('offloading_type', '2');
 		o.load = function(section_id) {
 			return uci.get('firewall', section_id, 'hnat_bind_rate') ||
