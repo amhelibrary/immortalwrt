@@ -466,6 +466,153 @@ int entry_delete_by_ip(bool is_ipv4, void *addr)
 	return ret;
 }
 
+/* NULL rule matches every PPPoE entry, routed ones included. */
+static bool pppoe_br_entry_match(struct foe_entry *entry,
+				 const struct pppoe_br_rule *rule)
+{
+	int pppoe_id;
+
+	if (!entry_hnat_is_bound(entry) || !entry->bfib1.psn)
+		return false;
+
+	if (IS_IPV4_GRP(entry))
+		pppoe_id = entry->ipv4_hnapt.pppoe_id;
+	else if (IS_IPV6_GRP(entry))
+		pppoe_id = entry->ipv6_5t_route.pppoe_id;
+	else
+		return false;
+
+	if (!rule)
+		return true;
+
+	return pppoe_id == rule->sid &&
+	       entry_mac_cmp(entry, (u8 *)rule->smac, ENTRY_CMP_SRC) &&
+	       entry_mac_cmp(entry, (u8 *)rule->dmac, ENTRY_CMP_DST);
+}
+
+void pppoe_br_entry_invalidate(const struct pppoe_br_rule *rule)
+{
+	struct foe_entry *entry;
+	int index, i, cnt;
+
+	for (i = 0; i < CFG_PPE_NUM; i++) {
+		entry = hnat_priv->foe_table_cpu[i];
+		cnt = 0;
+		for (index = 0; index < hnat_priv->foe_etry_num; entry++, index++) {
+			if (!pppoe_br_entry_match(entry, rule))
+				continue;
+
+			spin_lock_bh(&hnat_priv->entry_lock);
+			__entry_delete(entry);
+			spin_unlock_bh(&hnat_priv->entry_lock);
+			if (debug_level >= 2)
+				pr_info("[%s]: delete entry idx = %d_%d\n",
+					__func__, i, index);
+			cnt++;
+		}
+
+		/* clear HWNAT cache */
+		if (cnt > 0)
+			hnat_cache_clr(i);
+	}
+}
+
+static bool pppoe_br_rule_eq(const struct pppoe_br_rule *a,
+			     const struct pppoe_br_rule *b)
+{
+	return ether_addr_equal(a->smac, b->smac) &&
+	       ether_addr_equal(a->dmac, b->dmac) &&
+	       !strcmp(a->rx_dev, b->rx_dev) &&
+	       a->type == b->type && a->sid == b->sid;
+}
+
+/* Caller must hold pppoe_br_lock. */
+static struct pppoe_br_rule *pppoe_br_rule_find(const struct pppoe_br_rule *rule)
+{
+	struct pppoe_br_rule *tmp;
+
+	list_for_each_entry(tmp, &hnat_priv->pppoe_br_list, list)
+		if (pppoe_br_rule_eq(tmp, rule))
+			return tmp;
+
+	return NULL;
+}
+
+bool pppoe_br_rule_exist(const struct pppoe_br_rule *rule)
+{
+	bool found;
+
+	spin_lock_bh(&hnat_priv->pppoe_br_lock);
+	found = !!pppoe_br_rule_find(rule);
+	spin_unlock_bh(&hnat_priv->pppoe_br_lock);
+
+	return found;
+}
+
+int pppoe_br_rule_add(const struct pppoe_br_rule *rule)
+{
+	struct pppoe_br_rule *new_rule;
+	int ret = 0;
+
+	new_rule = kmemdup(rule, sizeof(*new_rule), GFP_KERNEL);
+	if (!new_rule)
+		return -ENOMEM;
+
+	spin_lock_bh(&hnat_priv->pppoe_br_lock);
+	if (pppoe_br_rule_find(rule))
+		ret = -EEXIST;
+	else
+		list_add_tail(&new_rule->list, &hnat_priv->pppoe_br_list);
+	spin_unlock_bh(&hnat_priv->pppoe_br_lock);
+
+	if (ret)
+		kfree(new_rule);
+
+	return ret;
+}
+
+int pppoe_br_rule_del(const struct pppoe_br_rule *rule)
+{
+	struct pppoe_br_rule *tmp;
+
+	spin_lock_bh(&hnat_priv->pppoe_br_lock);
+	tmp = pppoe_br_rule_find(rule);
+	if (tmp)
+		list_del(&tmp->list);
+	spin_unlock_bh(&hnat_priv->pppoe_br_lock);
+
+	if (!tmp)
+		return -ENOENT;
+
+	kfree(tmp);
+	pppoe_br_entry_invalidate(rule);
+
+	return 0;
+}
+
+void pppoe_br_rule_flush(void)
+{
+	struct pppoe_br_rule *tmp, *next;
+
+	spin_lock_bh(&hnat_priv->pppoe_br_lock);
+	list_for_each_entry_safe(tmp, next, &hnat_priv->pppoe_br_list, list) {
+		list_del(&tmp->list);
+		kfree(tmp);
+	}
+	spin_unlock_bh(&hnat_priv->pppoe_br_lock);
+}
+
+void pppoe_br_rule_dump(void)
+{
+	struct pppoe_br_rule *tmp;
+
+	spin_lock_bh(&hnat_priv->pppoe_br_lock);
+	list_for_each_entry(tmp, &hnat_priv->pppoe_br_list, list)
+		pr_info("SMAC=%pM => DMAC=%pM | rx_dev:%s | type:0x%04x | SID=0x%04x\n",
+			tmp->smac, tmp->dmac, tmp->rx_dev, tmp->type, tmp->sid);
+	spin_unlock_bh(&hnat_priv->pppoe_br_lock);
+}
+
 static int entry_delete_by_bssid_wcid(u32 wdma_idx, u16 bssid, u16 wcid)
 {
 	struct foe_entry *entry = NULL;
@@ -1742,6 +1889,10 @@ static int hnat_probe(struct platform_device *pdev)
 				dev_err(&pdev->dev, "Unable to request FE IRQ!\n");
 		}
 	}
+
+	/* used by the pppoe_bridge debugfs node */
+	spin_lock_init(&hnat_priv->pppoe_br_lock);
+	INIT_LIST_HEAD(&hnat_priv->pppoe_br_list);
 
 	err = hnat_init_debugfs(hnat_priv);
 	if (err)

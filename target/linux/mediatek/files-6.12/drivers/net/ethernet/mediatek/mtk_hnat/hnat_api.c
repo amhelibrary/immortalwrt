@@ -9,6 +9,7 @@
 #include "hnat.h"
 #include "hnat_api.h"
 #include "nf_hnat_mtk.h"
+#include "../mtk_eth_soc.h"
 
 void (*hnat_bind_callback)(struct hnat_tuple *opt) = NULL;
 void (*hnat_fin_callback)(struct hnat_tuple *opt) = NULL;
@@ -419,11 +420,11 @@ static int hnat_entry_set_hqos(struct foe_entry *entry, void *data)
 	if (!d || !entry)
 		return HNAT_FAIL;
 
-	if (d->qid >= MTK_QDMA_NUM_QUEUES)
+	if (d->qid >= HNAT_QDMA_NUM_QUEUES)
 		return HNAT_FAIL;
 
 	fqos = (d->fqos) ? 1 : 0;
-	qid = d->qid & MTK_QDMA_QUEUE_MASK;
+	qid = d->qid & HNAT_QDMA_QUEUE_MASK;
 
 	if (IS_IPV4_GRP(entry)) {
 		if (entry->ipv4_hnapt.iblk2.fqos == fqos &&
