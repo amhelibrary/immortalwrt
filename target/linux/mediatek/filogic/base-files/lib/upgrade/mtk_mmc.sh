@@ -40,6 +40,10 @@ mmc_dual_boot_upgrade_itb() {
 	[ -n "${upgrade_image_slot}" ] && {
 		v "Set new boot image slot to ${upgrade_image_slot}"
 		bspconf upd image ${upgrade_image_slot} "${fit_file}"
+		if which fw_setenv >/dev/null 2>&1; then
+			fw_setenv dual_boot.current_slot "${upgrade_image_slot}" 2>/dev/null || true
+			fw_setenv "dual_boot.slot_${upgrade_image_slot}_invalid" 0 2>/dev/null || true
+		fi
 	}
 
 	local rootfs_data_dev=$(cat /sys/firmware/devicetree/base/mediatek,rootfs_data-part 2>/dev/null)

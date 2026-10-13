@@ -1,69 +1,154 @@
-diff -uprN a/board/mediatek/common/mmc_helper.c b/board/mediatek/common/mmc_helper.c
---- a/board/mediatek/common/mmc_helper.c	2026-01-23 14:28:56.000000000 +0800
-+++ b/board/mediatek/common/mmc_helper.c	2026-10-08 18:04:45.427152957 +0800
-@@ -811,13 +811,24 @@ static int mmc_set_fdtargs_basic(struct
- 				 "0x%llx", env_off);
+--- a/board/mediatek/common/mmc_helper.c
++++ b/board/mediatek/common/mmc_helper.c
+@@ -817,6 +817,17 @@ static int mmc_set_fdtargs_basic(struct
+ 		}
+ 	}
  
- 			ret = fdtargs_set("mediatek,env-redund-offset",
--					  env_redund_offset);
--			if (ret)
--				return ret;
--		}
--	}
-+  env_redund_offset);
-+if (ret)
-+return ret;
-+}
-+}
-+
 +#ifdef CONFIG_MTK_BSPCONF_SUPPORT
-+{
-+char bspconf_part[BOOT_PARAM_STR_MAX_LEN];
++	{
++		static char bspconf_part[BOOT_PARAM_STR_MAX_LEN];
 +
-+ret = mmc_set_fdtarg_part(mmc, MTK_BSP_CONF_NAME,
-+  "mediatek,bspconf-part", bspconf_part);
-+if (!ret)
-+fdtargs_set("mediatek,bspconf-part-type", "blk");
-+}
-+#endif
- 
--	return 0;
-+return 0;
- }
- 
- static int _boot_from_mmc(struct mmc *mmc, u64 offset, bool do_boot)
-diff -uprN a/board/mediatek/common/mtd_helper.c b/board/mediatek/common/mtd_helper.c
---- a/board/mediatek/common/mtd_helper.c	2026-01-23 14:28:56.000000000 +0800
-+++ b/board/mediatek/common/mtd_helper.c	2026-10-08 18:04:45.427152957 +0800
-@@ -537,11 +537,21 @@ static int mtd_set_fdtargs_basic(void)
- 
- 	snprintf(env_size, sizeof(env_size), "0x%x", CONFIG_ENV_SIZE);
- 
--	ret = fdtargs_set("mediatek,env-size", env_size);
--	if (ret)
--		return ret;
-+ret = fdtargs_set("mediatek,env-size", env_size);
-+if (ret)
-+return ret;
- 
--	return 0;
-+#ifdef CONFIG_MTK_BSPCONF_SUPPORT
-+ret = fdtargs_set("mediatek,bspconf-part-type", "ubi");
-+if (ret)
-+return ret;
-+
-+ret = fdtargs_set("mediatek,bspconf-part-vol", MTK_BSP_CONF_NAME);
-+if (ret)
-+return ret;
++		ret = mmc_set_fdtarg_part(mmc, MTK_BSP_CONF_NAME,
++					  "mediatek,bspconf-part", bspconf_part);
++		if (!ret)
++			fdtargs_set("mediatek,bspconf-part-type", "blk");
++	}
 +#endif
 +
-+return 0;
+ 	return 0;
  }
  
- int boot_from_mtd(struct mtd_info *mtd, u64 offset, bool do_boot)
-diff -uprN a/board/mediatek/Kconfig b/board/mediatek/Kconfig
---- a/board/mediatek/Kconfig	2026-01-23 14:28:56.000000000 +0800
-+++ b/board/mediatek/Kconfig	2026-10-12 18:04:45.000000000 +0800
+--- a/board/mediatek/common/mtd_helper.c
++++ b/board/mediatek/common/mtd_helper.c
+@@ -541,6 +541,16 @@ static int mtd_set_fdtargs_basic(void)
+ 	if (ret)
+ 		return ret;
+ 
++#ifdef CONFIG_MTK_BSPCONF_SUPPORT
++	ret = fdtargs_set("mediatek,bspconf-part-type", "ubi");
++	if (ret)
++		return ret;
++
++	ret = fdtargs_set("mediatek,bspconf-part-vol", MTK_BSP_CONF_NAME);
++	if (ret)
++		return ret;
++#endif
++
+ 	return 0;
+ }
+ 
+--- a/board/mediatek/common/dual_boot.c
++++ b/board/mediatek/common/dual_boot.c
+@@ -20,6 +20,9 @@
+ #include "dual_boot.h"
+ #include "boot_helper.h"
+ #include "rootdisk.h"
++#ifdef CONFIG_MTK_BSPCONF_SUPPORT
++#include "bsp_conf.h"
++#endif
+ 
+ #define MTK_SIP_READ_NONRST_REG			0xC2000570
+ #define MTK_SIP_WRITE_NONRST_REG		0xC2000571
+@@ -63,6 +66,11 @@ void dual_boot_disable(void)
+ 
+ u32 dual_boot_get_current_slot(void)
+ {
++#ifdef CONFIG_MTK_BSPCONF_SUPPORT
++	if (curr_bspconf_index && curr_bspconf.current_image_slot < DUAL_BOOT_MAX_SLOTS)
++		return curr_bspconf.current_image_slot;
++#endif
++
+ 	char *end, *slot_str = env_get("dual_boot.current_slot");
+ 	ulong slot;
+ 
+@@ -95,6 +103,13 @@ int dual_boot_set_current_slot(u32 slot)
+ 		return -EINVAL;
+ 	}
+ 
++#ifdef CONFIG_MTK_BSPCONF_SUPPORT
++	if (curr_bspconf_index) {
++		curr_bspconf.current_image_slot = slot;
++		save_bsp_conf();
++	}
++#endif
++
+ 	ret = env_set_ulong("dual_boot.current_slot", slot);
+ 	if (ret) {
+ 		printf("Failed to set current slot in env\n");
+@@ -110,6 +125,11 @@ int dual_boot_set_current_slot(u32 slot)
+ 
+ bool dual_boot_is_slot_invalid(u32 slot)
+ {
++#ifdef CONFIG_MTK_BSPCONF_SUPPORT
++	if (curr_bspconf_index && slot < IMAGE_NUM)
++		return !!curr_bspconf.image[slot].invalid;
++#endif
++
+ 	char envname[64], *val;
+ 
+ 	snprintf(envname, sizeof(envname), "dual_boot.slot_%u_invalid", slot);
+@@ -129,6 +149,14 @@ int dual_boot_set_slot_invalid(u32 slot,
+ 	char envname[64];
+ 	int ret;
+ 
++#ifdef CONFIG_MTK_BSPCONF_SUPPORT
++	if (curr_bspconf_index && slot < IMAGE_NUM) {
++		curr_bspconf.image[slot].invalid = invalid ? 1 : 0;
++		if (save)
++			save_bsp_conf();
++	}
++#endif
++
+ 	snprintf(envname, sizeof(envname), "dual_boot.slot_%u_invalid", slot);
+ 
+ 	ret = env_set_ulong(envname, invalid ? 1 : 0);
+@@ -255,6 +283,12 @@ int dual_boot(struct dual_boot_priv *pri
+ 			maxcount = 1;
+ 	}
+ 
++	if (dual_boot_is_slot_invalid(slot) && dual_boot_is_slot_invalid(dual_boot_get_next_slot())) {
++		printf("Warning: all image slots are marked invalid! Resetting invalid flags to attempt recovery.\n");
++		dual_boot_set_slot_invalid(slot, false, false);
++		dual_boot_set_slot_invalid(dual_boot_get_next_slot(), false, true);
++	}
++
+ 	if (dual_boot_is_slot_invalid(slot)) {
+ 		printf("Image slot %u was marked invalid.\n", slot);
+ 	} else {
+--- a/board/mediatek/common/bootmenu_mmc.c
++++ b/board/mediatek/common/bootmenu_mmc.c
+@@ -212,6 +212,11 @@ int board_late_init(void)
+ 	if (IS_ENABLED(CONFIG_MTK_BSPCONF_SUPPORT)) {
+ 		generic_mmc_import_bsp_conf();
+ 		import_bsp_conf_bl2(CONFIG_TEXT_BASE);
++		if (!curr_bspconf_index) {
++			memset(&curr_bspconf, 0, sizeof(curr_bspconf));
++			__save_bsp_conf(true);
++			__save_bsp_conf(true);
++		}
+ 	}
+ 
+ 	return 0;
+--- a/board/mediatek/common/cmd_bspconf.c
++++ b/board/mediatek/common/cmd_bspconf.c
+@@ -53,7 +53,6 @@ static const struct bspconf_field_info b
+ 	BSPCONF_FIELD_U32(fip[1].size, 0, UINT32_MAX),
+ 	BSPCONF_FIELD_U32_FMT(fip[1].crc32, 0, UINT32_MAX, FORMAT_HEX_FULL),
+ 	BSPCONF_FIELD_U32(fip[1].upd_cnt, 0, UINT32_MAX),
+-#if 0
+ 	BSPCONF_FIELD_U32(current_image_slot, 0, IMAGE_NUM - 1),
+ 	BSPCONF_FIELD_U32(image[0].invalid, 0, UINT32_MAX),
+ 	BSPCONF_FIELD_U32(image[0].size, 0, UINT32_MAX),
+@@ -63,7 +62,6 @@ static const struct bspconf_field_info b
+ 	BSPCONF_FIELD_U32(image[1].size, 0, UINT32_MAX),
+ 	BSPCONF_FIELD_U32_FMT(image[1].crc32, 0, UINT32_MAX, FORMAT_HEX_FULL),
+ 	BSPCONF_FIELD_U32(image[1].upd_cnt, 0, UINT32_MAX),
+-#endif
+ };
+ 
+ static int do_bspconf_help(int exitcode)
+--- a/board/mediatek/Kconfig
++++ b/board/mediatek/Kconfig
 @@ -400,6 +400,7 @@ endif # MTK_FW_ENCRYPT
  
  menuconfig MTK_DUAL_BOOT

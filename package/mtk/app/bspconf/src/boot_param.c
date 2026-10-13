@@ -8,6 +8,7 @@
  */
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <stdbool.h>
 #include <string.h>
 #include <glob.h>
@@ -115,35 +116,32 @@ static char *find_block_dev(const char *key, bool is_uuid)
 
 char *blockdev_parse(const char *name)
 {
-	char *e, *part_dev_path;
+	char *buf, *e, *part_dev_path = NULL;
 	struct stat st;
 
 	if (!name)
 		return NULL;
 
-	e = strchr(name, '=');
+	buf = strdup(name);
+	if (!buf)
+		return NULL;
+
+	e = strchr(buf, '=');
 	if (e) {
 		*e = 0;
 		e++;
 	}
 
 	if (!e) {
-		if (stat(name, &st))
-			return NULL;
-
-		if (!S_ISBLK(st.st_mode))
-			return NULL;
-
-		part_dev_path = strdup(name);
-	} else if (!strcmp(name, "PARTLABEL")) {
+		if (!stat(buf, &st) && S_ISBLK(st.st_mode))
+			part_dev_path = strdup(buf);
+	} else if (!strcmp(buf, "PARTLABEL")) {
 		part_dev_path = find_block_dev(e, false);
-	} else if (!strcmp(name, "PARTUUID")) {
-		if (strlen(e) != 36)
-			return NULL;
-		part_dev_path = find_block_dev(e, true);
-	} else {
-		return NULL;
+	} else if (!strcmp(buf, "PARTUUID")) {
+		if (strlen(e) == 36)
+			part_dev_path = find_block_dev(e, true);
 	}
 
+	free(buf);
 	return part_dev_path;
 }

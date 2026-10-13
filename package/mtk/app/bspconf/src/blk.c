@@ -46,14 +46,17 @@ int init_bspconf_blk(void)
 
 	ret = read_boot_param_string("bspconf-part", bspconf_part_id,
 				     sizeof(bspconf_part_id));
-	if (ret < 0) {
-		error("bspconf block identifier not present\n");
-		return -1;
+	if (ret >= 0) {
+		debug("bspconf block identifier: %s\n", bspconf_part_id);
+		bspconf_part_dev = blockdev_parse(bspconf_part_id);
 	}
 
-	debug("bspconf block identifier: %s\n", bspconf_part_id);
+	if (!bspconf_part_dev) {
+		bspconf_part_dev = blockdev_parse("PARTLABEL=bspconf");
+		if (bspconf_part_dev)
+			snprintf(bspconf_part_id, sizeof(bspconf_part_id), "PARTLABEL=bspconf");
+	}
 
-	bspconf_part_dev = blockdev_parse(bspconf_part_id);
 	if (!bspconf_part_dev) {
 		error("bspconf block device not exist\n");
 		return -1;
