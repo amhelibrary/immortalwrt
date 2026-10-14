@@ -51,9 +51,9 @@ mmc_dual_boot_upgrade_itb() {
 				fw_cfg_arg="-c /tmp/fw_env.config"
 			fi
 		fi
-		if which fw_setenv >/dev/null 2>&1; then
-			fw_setenv $fw_cfg_arg dual_boot.current_slot "${upgrade_image_slot}" 2>/dev/null || true
-			fw_setenv $fw_cfg_arg "dual_boot.slot_${upgrade_image_slot}_invalid" 0 2>/dev/null || true
+		if command -v fw_setenv >/dev/null 2>&1 || [ -x /usr/sbin/fw_setenv ]; then
+			fw_setenv $fw_cfg_arg dual_boot.current_slot "${upgrade_image_slot}" || true
+			fw_setenv $fw_cfg_arg "dual_boot.slot_${upgrade_image_slot}_invalid" 0 || true
 		fi
 	}
 

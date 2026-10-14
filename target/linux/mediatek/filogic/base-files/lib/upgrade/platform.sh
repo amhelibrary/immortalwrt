@@ -1,5 +1,5 @@
 REQUIRE_IMAGE_METADATA=1
-RAMFS_COPY_BIN='fitblk blkid bspconf dmsetup fit_check_sign'
+RAMFS_COPY_BIN='fitblk blkid bspconf dmsetup fit_check_sign fw_printenv fw_setenv'
 
 asus_initial_setup()
 {
