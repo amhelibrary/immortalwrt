@@ -201,7 +201,25 @@ jdcloud,re-cp-03)
 		;;
 	emmc)
 		bootdev=${EMMC_KERN_DEV%%p[0-9]*}
-		ubootenv_add_mmc_default "${bootdev#/dev/}"
+		case "$board" in
+		bananapi,bpi-r4*)
+			local envpart="$(find_mmc_part "u-boot-env" "${bootdev#/dev/}")"
+			[ -z "$envpart" ] && envpart="$(block_dev_path "PARTLABEL=u-boot-env")"
+			[ -z "$envpart" ] && envpart="${bootdev}p2"
+			if [ -b "$envpart" ]; then
+				local dev_type="$(cat /sys/block/${bootdev#/dev/}/device/type 2>/dev/null)"
+				ubootenv_add_uci_config "$envpart" "0x0" "0x80000" "0x80000" "1"
+				if [ "$dev_type" = "MMC" ]; then
+					ubootenv_add_uci_config "$envpart" "0x80000" "0x80000" "0x80000" "1"
+				fi
+			else
+				ubootenv_add_mmc_default "${bootdev#/dev/}"
+			fi
+			;;
+		*)
+			ubootenv_add_mmc_default "${bootdev#/dev/}"
+			;;
+		esac
 		;;
 	default)
 		ubootenv_add_nor_default

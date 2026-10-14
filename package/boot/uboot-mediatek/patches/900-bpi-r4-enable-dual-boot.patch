@@ -115,6 +115,56 @@
  	if (dual_boot_is_slot_invalid(slot)) {
  		printf("Image slot %u was marked invalid.\n", slot);
  	} else {
+@@ -289,29 +323,30 @@ int dual_boot(struct dual_boot_priv *pri
+ 	slot = dual_boot_get_next_slot();
+ 
+ 	if (dual_boot_is_slot_invalid(slot)) {
+-		printf("Image slot %u was marked invalid.\n", slot);
+-	} else {
+-		ret = dual_boot_set_current_slot(slot);
+-		if (ret) {
+-			panic("Error: failed to set new image boot slot, error %d\n",
+-			      ret);
+-			return ret;
+-		}
++		printf("Image slot %u was marked invalid. Resetting invalid flag for fallback attempt!\n", slot);
++		dual_boot_set_slot_invalid(slot, false, true);
++	}
+ 
+-		if (maxcount) {
+-			printf("Setting image slot %u with boot count 1\n", slot);
+-			dual_boot_set_boot_count(slot, 1);
+-		}
++	ret = dual_boot_set_current_slot(slot);
++	if (ret) {
++		panic("Error: failed to set new image boot slot, error %d\n",
++		      ret);
++		return ret;
++	}
+ 
+-		ret = priv->boot_slot(priv, slot, do_boot);
+-			if (!ret && !do_boot)
+-				return 0;
++	if (maxcount) {
++		printf("Setting image slot %u with boot count 1\n", slot);
++		dual_boot_set_boot_count(slot, 1);
++	}
+ 
+-		printf("Failed to boot from next image slot, error %d\n", ret);
+-		printf("Image slot %u will be marked invalid.\n", slot);
++	ret = priv->boot_slot(priv, slot, do_boot);
++		if (!ret && !do_boot)
++			return 0;
+ 
+-		dual_boot_set_slot_invalid(slot, true, true);
+-	}
++	printf("Failed to boot from next image slot, error %d\n", ret);
++	printf("Image slot %u will be marked invalid.\n", slot);
++
++	dual_boot_set_slot_invalid(slot, true, true);
+ 
+ 	return ret;
+ }
 --- a/board/mediatek/common/bootmenu_mmc.c
 +++ b/board/mediatek/common/bootmenu_mmc.c
 @@ -212,6 +212,11 @@ int board_late_init(void)

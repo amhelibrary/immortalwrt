@@ -31,7 +31,7 @@ mmc_dual_boot_upgrade_itb() {
 	local firmware_part=$(cat /sys/firmware/devicetree/base/mediatek,upgrade-firmware-part 2>/dev/null)
 	[ -z "${firmware_part}" -o $? -ne 0 ] && return 1
 
-	EMMC_KERN_DEV=$(block_dev_path "${firmware_part}")
+	export EMMC_KERN_DEV=$(block_dev_path "${firmware_part}")
 	[ -z "${EMMC_KERN_DEV}" -o $? -ne 0 ] && return 1
 
 	export EMMC_KERNEL_BLOCKS=$(($(get_image "$fit_file" | fwtool -i /dev/null -T - | dd of="$EMMC_KERN_DEV" bs=512 2>&1 | grep "records out" | cut -d' ' -f1)))
@@ -39,10 +39,21 @@ mmc_dual_boot_upgrade_itb() {
 	local upgrade_image_slot=$(cat /sys/firmware/devicetree/base/mediatek,upgrade-image-slot 2>/dev/null)
 	[ -n "${upgrade_image_slot}" ] && {
 		v "Set new boot image slot to ${upgrade_image_slot}"
-		bspconf upd image ${upgrade_image_slot} "${fit_file}"
+		bspconf upd image ${upgrade_image_slot} "${fit_file}" 2>/dev/null || bspconf upd image ${upgrade_image_slot} 2>/dev/null || true
+		local fw_cfg_arg=""
+		if [ ! -s /etc/fw_env.config ]; then
+			local bootdev=${EMMC_KERN_DEV%%p[0-9]*}
+			local envpart="$(find_mmc_part "u-boot-env" "${bootdev#/dev/}")"
+			[ -z "$envpart" ] && envpart="$(block_dev_path "PARTLABEL=u-boot-env")"
+			[ -z "$envpart" ] && envpart="${bootdev}p2"
+			if [ -b "$envpart" ]; then
+				echo "$envpart 0x0 0x80000 0x80000 1" > /tmp/fw_env.config
+				fw_cfg_arg="-c /tmp/fw_env.config"
+			fi
+		fi
 		if which fw_setenv >/dev/null 2>&1; then
-			fw_setenv dual_boot.current_slot "${upgrade_image_slot}" 2>/dev/null || true
-			fw_setenv "dual_boot.slot_${upgrade_image_slot}_invalid" 0 2>/dev/null || true
+			fw_setenv $fw_cfg_arg dual_boot.current_slot "${upgrade_image_slot}" 2>/dev/null || true
+			fw_setenv $fw_cfg_arg "dual_boot.slot_${upgrade_image_slot}_invalid" 0 2>/dev/null || true
 		fi
 	}
 

@@ -443,14 +443,13 @@ find_mtd_part() {
 find_mmc_part() {
 	local DEVNAME PARTNAME ROOTDEV
 
-	if grep -q "$1" /proc/mtd; then
-		echo "" && return 0
-	fi
-
 	if [ -n "$2" ]; then
 		ROOTDEV="$2"
 	else
 		ROOTDEV="mmcblk*"
+		if grep -q "$1" /proc/mtd; then
+			echo "" && return 0
+		fi
 	fi
 
 	for DEVNAME in /sys/block/$ROOTDEV/mmcblk*p*; do

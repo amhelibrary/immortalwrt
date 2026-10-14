@@ -145,7 +145,10 @@ platform_do_upgrade() {
 		done
 		export_fitblk_bootdev
 		if [ -z "$CI_METHOD" ]; then
-			local mmc_part="$(find_mmc_part "firmware")"
+			local mmc_part=""
+			local upgrade_part=$(cat /sys/firmware/devicetree/base/mediatek,upgrade-firmware-part 2>/dev/null)
+			[ -n "$upgrade_part" ] && mmc_part=$(block_dev_path "$upgrade_part" 2>/dev/null)
+			[ -z "$mmc_part" ] && mmc_part="$(find_mmc_part "firmware")"
 			[ -z "$mmc_part" ] && mmc_part="$(find_mmc_part "firmware2")"
 			[ -z "$mmc_part" ] && mmc_part="$(find_mmc_part "production")"
 			if [ -n "$mmc_part" ]; then
@@ -517,8 +520,11 @@ platform_copy_config() {
 	mediatek,mt7988a-rfb-gsw|\
 	mediatek,mt7988d-rfb|\
 	mediatek,mt7988d-rfb-gsw)
+		local upgrade_part=$(cat /sys/firmware/devicetree/base/mediatek,upgrade-firmware-part 2>/dev/null)
+		[ -n "$upgrade_part" ] && export EMMC_KERN_DEV=$(block_dev_path "$upgrade_part" 2>/dev/null)
 		if [ -z "$CI_METHOD" ]; then
-			local mmc_part="$(find_mmc_part "firmware")"
+			local mmc_part="$EMMC_KERN_DEV"
+			[ -z "$mmc_part" ] && mmc_part="$(find_mmc_part "firmware")"
 			[ -z "$mmc_part" ] && mmc_part="$(find_mmc_part "firmware2")"
 			[ -z "$mmc_part" ] && mmc_part="$(find_mmc_part "production")"
 			if [ -n "$mmc_part" ]; then
