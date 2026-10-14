@@ -36,6 +36,7 @@
 #define NMBM_MGMT_BLOCKS_MIN			32
 
 #define NMBM_TRY_COUNT				3
+#define NMBM_MAX_CONSECUTIVE_FAILURES		3
 
 #define BLOCK_ST_BAD				0
 #define BLOCK_ST_NEED_REMAP			2
@@ -82,20 +83,24 @@ struct nmbm_instance {
 
 	u8 *info_table_cache;
 	u32 info_table_size;
+	u32 info_table_committed_write_count;
 	u32 info_table_spare_blocks;
 	struct nmbm_info_table_header info_table;
 
 	u32 *block_state;
 	u32 block_state_changed;
+	u32 block_state_cached;
 	u32 state_table_size;
 
 	int32_t *block_mapping;
 	u32 block_mapping_changed;
+	u32 block_mapping_cached;
 	u32 mapping_table_size;
 
 	u8 *page_cache;
 
 	int protected;
+	bool info_table_update_aborted;
 
 	u32 block_count;
 	u32 data_block_count;
@@ -302,7 +307,7 @@ static bool nmbm_write_phys_page(struct nmbm_instance *ni, uint64_t addr,
  *
  * Erase a block for at most NMBM_TRY_COUNT times.
  */
-static bool nmbm_erase_phys_block(struct nmbm_instance *ni, uint64_t addr)
+static int nmbm_erase_phys_block(struct nmbm_instance *ni, uint64_t addr)
 {
 	int tries, ret;
 
@@ -314,12 +319,12 @@ static bool nmbm_erase_phys_block(struct nmbm_instance *ni, uint64_t addr)
 
 		ret = bmtd._erase(bmtd.mtd, &ei);
 		if (!ret)
-			return true;
+			return 0;
 	}
 
 	nlog_err(ni, "Block erasure failed at address 0x%08llx\n", addr);
 
-	return false;
+	return ret;
 }
 
 /*
@@ -327,11 +332,19 @@ static bool nmbm_erase_phys_block(struct nmbm_instance *ni, uint64_t addr)
  * @ni: NMBM instance structure
  * @ba: block address
  */
-static bool nmbm_check_bad_phys_block(struct nmbm_instance *ni, uint32_t ba)
+static int nmbm_check_bad_phys_block(struct nmbm_instance *ni, uint32_t ba)
 {
 	uint64_t addr = ba2addr(ni, ba);
+	int tries, ret;
 
-	return bmtd._block_isbad(bmtd.mtd, addr);
+	for (tries = 0; tries < NMBM_TRY_COUNT; tries++) {
+		ret = bmtd._block_isbad(bmtd.mtd, addr);
+		if (ret >= 0)
+			return !!ret;
+	}
+
+	nlog_err(ni, "Failed to check bad-block marker at 0x%08llx\n", addr);
+	return ret;
 }
 
 /*
@@ -592,17 +605,24 @@ static bool nmbm_block_walk(struct nmbm_instance *ni, bool ascending,
  * Scan the entire lower NAND chip and record all bad blocks in to block state
  * table.
  */
-static void nmbm_scan_badblocks(struct nmbm_instance *ni)
+static bool nmbm_scan_badblocks(struct nmbm_instance *ni)
 {
 	uint32_t ba;
+	int ret;
 
 	for (ba = 0; ba < ni->block_count; ba++) {
-		if (nmbm_check_bad_phys_block(ni, ba)) {
+		ret = nmbm_check_bad_phys_block(ni, ba);
+		if (ret < 0)
+			return false;
+
+		if (ret) {
 			nmbm_set_block_state(ni, ba, BLOCK_ST_BAD);
 			nlog_info(ni, "Bad block %u [0x%08llx]\n", ba,
 				 ba2addr(ni, ba));
 		}
 	}
+
+	return true;
 }
 
 /*
@@ -638,44 +658,37 @@ static void nmbm_build_mapping_table(struct nmbm_instance *ni)
  *
  * Erase a block anc check its usability
  *
- * Return true if the block is usable, false if erasure failure or the block
- * has too many bitflips.
+ * Return 0 if the block is usable, 1 if it should be retired, or a negative
+ * error for a verification failure that does not prove the block is bad.
  */
-static bool nmbm_erase_block_and_check(struct nmbm_instance *ni, uint32_t ba)
+static int nmbm_erase_block_and_check(struct nmbm_instance *ni, uint32_t ba)
 {
 	uint64_t addr, off;
-	bool success;
 	int ret;
 
-	success = nmbm_erase_phys_block(ni, ba2addr(ni, ba));
-	if (!success)
-		return false;
+	ret = nmbm_erase_phys_block(ni, ba2addr(ni, ba));
+	if (ret)
+		return 1;
 
 	if (!ni->empty_page_ecc_ok)
-		return true;
+		return 0;
 
 	/* Check every page to make sure there aren't too many bitflips */
-
 	addr = ba2addr(ni, ba);
-
 	for (off = 0; off < bmtd.blk_size; off += bmtd.pg_size) {
 		ret = nmbm_read_phys_page(ni, addr + off, ni->page_cache, NULL);
 		if (ret == -EBADMSG) {
-			/*
-			 * empty_page_ecc_ok means the empty page is
-			 * still protected by ECC. So reading pages with ECC
-			 * enabled and -EBADMSG means there are too many
-			 * bitflips that can't be recovered, and the block
-			 * containing the page should be marked bad.
-			 */
-			nlog_err(ni,
-				 "Too many bitflips in empty page at 0x%llx\n",
+			/* Empty pages are ECC-protected; this block is unusable. */
+			nlog_err(ni, "Too many bitflips in empty page at 0x%llx\n",
 				 addr + off);
-			return false;
+			return 1;
 		}
+
+		if (ret < 0)
+			return ret;
 	}
 
-	return true;
+	return 0;
 }
 
 /*
@@ -692,24 +705,39 @@ static bool nmbm_erase_block_and_check(struct nmbm_instance *ni, uint32_t ba)
 static void nmbm_erase_range(struct nmbm_instance *ni, uint32_t ba,
 			     uint32_t limit)
 {
-	bool success;
+	uint32_t consecutive_failures = 0;
+	int ret;
 
 	while (ba < limit) {
 		if (nmbm_get_block_state(ni, ba) != BLOCK_ST_GOOD)
 			goto next_block;
 
 		/* Insurance to detect unexpected bad block marked by user */
-		if (nmbm_check_bad_phys_block(ni, ba)) {
+		ret = nmbm_check_bad_phys_block(ni, ba);
+		if (ret < 0)
+			break;
+
+		if (ret) {
 			nmbm_set_block_state(ni, ba, BLOCK_ST_BAD);
 			goto next_block;
 		}
 
-		success = nmbm_erase_block_and_check(ni, ba);
-		if (success)
+		ret = nmbm_erase_block_and_check(ni, ba);
+		if (ret < 0)
+			break;
+
+		if (!ret) {
+			consecutive_failures = 0;
 			goto next_block;
+		}
 
 		nmbm_mark_phys_bad_block(ni, ba);
 		nmbm_set_block_state(ni, ba, BLOCK_ST_BAD);
+		if (++consecutive_failures >= NMBM_MAX_CONSECUTIVE_FAILURES) {
+			nlog_err(ni, "Stopping erase after %u consecutive failures\n",
+				 consecutive_failures);
+			break;
+		}
 
 	next_block:
 		ba++;
@@ -781,20 +809,29 @@ static bool nmbm_write_signature(struct nmbm_instance *ni, uint32_t limit,
 				 uint32_t *signature_ba)
 {
 	uint32_t ba = ni->block_count - 1;
+	uint32_t consecutive_failures = 0;
 	bool success;
+	int ret;
 
 	while (ba > limit) {
 		if (nmbm_get_block_state(ni, ba) != BLOCK_ST_GOOD)
 			goto next_block;
 
 		/* Insurance to detect unexpected bad block marked by user */
-		if (nmbm_check_bad_phys_block(ni, ba)) {
+		ret = nmbm_check_bad_phys_block(ni, ba);
+		if (ret < 0)
+			return false;
+
+		if (ret) {
 			nmbm_set_block_state(ni, ba, BLOCK_ST_BAD);
 			goto next_block;
 		}
 
-		success = nmbm_erase_block_and_check(ni, ba);
-		if (!success)
+		ret = nmbm_erase_block_and_check(ni, ba);
+		if (ret < 0)
+			return false;
+
+		if (ret)
 			goto skip_bad_block;
 
 		success = nmbm_write_repeated_data(ni, ba, signature,
@@ -807,6 +844,11 @@ static bool nmbm_write_signature(struct nmbm_instance *ni, uint32_t limit,
 	skip_bad_block:
 		nmbm_mark_phys_bad_block(ni, ba);
 		nmbm_set_block_state(ni, ba, BLOCK_ST_BAD);
+		if (++consecutive_failures >= NMBM_MAX_CONSECUTIVE_FAILURES) {
+			nlog_err(ni, "Stopping signature write after %u consecutive failures\n",
+				 consecutive_failures);
+			return false;
+		}
 
 	next_block:
 		ba--;
@@ -831,10 +873,13 @@ static bool nmbm_write_signature(struct nmbm_instance *ni, uint32_t limit,
 static int nmbn_read_data(struct nmbm_instance *ni, uint64_t addr, void *data,
 			  uint32_t size)
 {
-	uint64_t off = addr;
+	uint64_t end = ba2addr(ni, ni->block_count), off = addr;
 	uint8_t *ptr = data;
 	uint32_t sizeremain = size, chunksize, leading;
 	int ret;
+
+	if (addr >= end || size > end - addr)
+		return -EINVAL;
 
 	while (sizeremain) {
 		leading = off & (bmtd.pg_size - 1);
@@ -876,11 +921,14 @@ static int nmbn_read_data(struct nmbm_instance *ni, uint64_t addr, void *data,
 static bool nmbn_write_verify_data(struct nmbm_instance *ni, uint64_t addr,
 				   const void *data, uint32_t size)
 {
-	uint64_t off = addr;
+	uint64_t end = ba2addr(ni, ni->block_count), off = addr;
 	const uint8_t *ptr = data;
 	uint32_t sizeremain = size, chunksize, leading;
 	bool success;
 	int ret;
+
+	if (addr >= end || size > end - addr)
+		return false;
 
 	while (sizeremain) {
 		leading = off & (bmtd.pg_size - 1);
@@ -932,7 +980,9 @@ static bool nmbm_write_mgmt_range(struct nmbm_instance *ni, uint32_t ba,
 {
 	const uint8_t *ptr = data;
 	uint32_t sizeremain = size, chunksize;
+	uint32_t consecutive_failures = 0;
 	bool success;
+	int ret;
 
 	while (sizeremain && ba < limit) {
 		chunksize = sizeremain;
@@ -943,13 +993,20 @@ static bool nmbm_write_mgmt_range(struct nmbm_instance *ni, uint32_t ba,
 			goto next_block;
 
 		/* Insurance to detect unexpected bad block marked by user */
-		if (nmbm_check_bad_phys_block(ni, ba)) {
+		ret = nmbm_check_bad_phys_block(ni, ba);
+		if (ret < 0)
+			return false;
+
+		if (ret) {
 			nmbm_set_block_state(ni, ba, BLOCK_ST_BAD);
 			goto next_block;
 		}
 
-		success = nmbm_erase_block_and_check(ni, ba);
-		if (!success)
+		ret = nmbm_erase_block_and_check(ni, ba);
+		if (ret < 0)
+			return false;
+
+		if (ret)
 			goto skip_bad_block;
 
 		success = nmbn_write_verify_data(ni, ba2addr(ni, ba), ptr,
@@ -962,12 +1019,19 @@ static bool nmbm_write_mgmt_range(struct nmbm_instance *ni, uint32_t ba,
 
 		ptr += chunksize;
 		sizeremain -= chunksize;
+		consecutive_failures = 0;
 
 		goto next_block;
 
 	skip_bad_block:
 		nmbm_mark_phys_bad_block(ni, ba);
 		nmbm_set_block_state(ni, ba, BLOCK_ST_BAD);
+		if (++consecutive_failures >= NMBM_MAX_CONSECUTIVE_FAILURES) {
+			nlog_err(ni, "Stopping info-table write after %u consecutive failures\n",
+				 consecutive_failures);
+			ni->info_table_update_aborted = true;
+			return false;
+		}
 
 	next_block:
 		ba++;
@@ -990,6 +1054,9 @@ static bool nmbm_write_mgmt_range(struct nmbm_instance *ni, uint32_t ba,
 static bool nmbm_generate_info_table_cache(struct nmbm_instance *ni)
 {
 	bool changed = false;
+
+	ni->block_state_cached = ni->block_state_changed;
+	ni->block_mapping_cached = ni->block_mapping_changed;
 
 	memset(ni->info_table_cache, 0xff, ni->info_table_size);
 
@@ -1040,8 +1107,20 @@ static bool nmbm_write_info_table(struct nmbm_instance *ni, uint32_t ba,
  */
 static void nmbm_mark_tables_clean(struct nmbm_instance *ni)
 {
-	ni->block_state_changed = 0;
-	ni->block_mapping_changed = 0;
+	ni->info_table_committed_write_count = ni->info_table.write_count;
+
+	if (ni->block_state_changed >= ni->block_state_cached)
+		ni->block_state_changed -= ni->block_state_cached;
+	else
+		ni->block_state_changed = 0;
+
+	if (ni->block_mapping_changed >= ni->block_mapping_cached)
+		ni->block_mapping_changed -= ni->block_mapping_cached;
+	else
+		ni->block_mapping_changed = 0;
+
+	ni->block_state_cached = 0;
+	ni->block_mapping_cached = 0;
 }
 
 /*
@@ -1098,6 +1177,7 @@ static bool nmbm_rebuild_info_table(struct nmbm_instance *ni)
 		nlog_err(ni, "Unable to write at least one info table!\n");
 		nlog_err(ni, "Please save your data before power off!\n");
 		ni->protected = 1;
+		bmtd.mtd->flags &= ~MTD_WRITEABLE;
 		return false;
 	}
 
@@ -1183,6 +1263,9 @@ static bool nmbm_rescue_single_info_table(struct nmbm_instance *ni)
 		return true;
 	}
 
+	if (ni->info_table_update_aborted)
+		return false;
+
 	/* Try to reserve spare blocks for existing table */
 	success = nmbm_try_reserve_blocks(ni, ni->mapping_blocks_ba, &write_ba,
 					  ni->info_table_spare_blocks, 0,
@@ -1201,6 +1284,9 @@ static bool nmbm_rescue_single_info_table(struct nmbm_instance *ni)
 						&table_end_ba);
 		if (success)
 			break;
+
+		if (ni->info_table_update_aborted)
+			return false;
 
 		write_ba--;
 	}
@@ -1261,6 +1347,9 @@ static bool nmbm_update_single_info_table(struct nmbm_instance *ni,
 		return true;
 	}
 
+	if (ni->info_table_update_aborted)
+		return false;
+
 	if (update_main_table) {
 		/*
 		 * If failed to update main table, make backup table the new
@@ -1317,6 +1406,9 @@ static bool nmbm_rescue_main_info_table(struct nmbm_instance *ni)
 		if (success)
 			break;
 
+		if (ni->info_table_update_aborted)
+			return false;
+
 		write_ba--;
 	}
 
@@ -1341,6 +1433,9 @@ static bool nmbm_rescue_main_info_table(struct nmbm_instance *ni)
 					&main_table_start_ba,
 					&main_table_end_ba);
 	if (!success) {
+		if (ni->info_table_update_aborted)
+			return false;
+
 		/* Temporary info table becomes the main table */
 		ni->main_table_ba = tmp_table_start_ba;
 		ni->backup_table_ba = 0;
@@ -1396,6 +1491,9 @@ static bool nmbm_rescue_main_info_table(struct nmbm_instance *ni)
 		if (success)
 			break;
 
+		if (ni->info_table_update_aborted)
+			return false;
+
 		write_ba--;
 	}
 
@@ -1438,10 +1536,12 @@ static bool nmbm_update_info_table_once(struct nmbm_instance *ni, bool force)
 	if (!nmbm_generate_info_table_cache(ni) && !force)
 		return true;
 
-	/* Check whether both two tables exist */
+	/* Never erase the only valid table in place. */
 	if (!ni->backup_table_ba) {
-		main_table_limit = ni->mapping_blocks_top_ba;
-		goto write_main_table;
+		if (!ni->main_table_ba)
+			goto rebuild_tables;
+
+		return nmbm_rescue_single_info_table(ni);
 	}
 
 	/*
@@ -1455,15 +1555,17 @@ static bool nmbm_update_info_table_once(struct nmbm_instance *ni, bool force)
 					ni->mapping_blocks_top_ba,
 					&table_start_ba, &table_end_ba);
 	if (!success) {
+		if (ni->info_table_update_aborted)
+			return false;
+
 		/*
-		 * There is nothing to do if failed to write backup table.
-		 * Write the main table now.
+		 * The old main table is still valid. Do not overwrite it after
+		 * losing the backup; create a replacement copy elsewhere.
 		 */
 		nlog_err(ni, "No room for backup table\n");
 		ni->mapping_blocks_ba = ni->backup_table_ba;
 		ni->backup_table_ba = 0;
-		main_table_limit = ni->mapping_blocks_top_ba;
-		goto write_main_table;
+		return nmbm_rescue_single_info_table(ni);
 	}
 
 	/* Backup table is successfully written, record its offset */
@@ -1479,7 +1581,6 @@ static bool nmbm_update_info_table_once(struct nmbm_instance *ni, bool force)
 
 	nlog_table_update(ni, false, table_start_ba, table_end_ba);
 
-write_main_table:
 	if (!ni->main_table_ba)
 		goto rebuild_tables;
 
@@ -1488,6 +1589,9 @@ write_main_table:
 					main_table_limit, &table_start_ba,
 					&table_end_ba);
 	if (!success) {
+		if (ni->info_table_update_aborted)
+			return false;
+
 		/* If failed to write main table, go rescue procedure */
 		if (!ni->backup_table_ba)
 			goto rebuild_tables;
@@ -1526,12 +1630,22 @@ static bool nmbm_update_info_table(struct nmbm_instance *ni)
 	bool success;
 
 	if (ni->protected)
-		return true;
+		return false;
+
+	ni->info_table_update_aborted = false;
 
 	while (ni->block_state_changed || ni->block_mapping_changed) {
 		success = nmbm_update_info_table_once(ni, false);
 		if (!success) {
+			if (ni->info_table_update_aborted) {
+				/* Keep the last committed table usable after a burst failure. */
+				nlog_err(ni, "Info table update aborted after consecutive erase failures\n");
+				return false;
+			}
+
 			nlog_err(ni, "Failed to update info table\n");
+			ni->protected = 1;
+			bmtd.mtd->flags &= ~MTD_WRITEABLE;
 			return false;
 		}
 	}
@@ -1549,7 +1663,7 @@ static bool nmbm_map_block(struct nmbm_instance *ni, uint32_t lb)
 	uint32_t pb;
 	bool success;
 
-	if (ni->mapping_blocks_ba == ni->mapping_blocks_top_ba) {
+	if (ni->mapping_blocks_top_ba <= ni->mapping_blocks_ba) {
 		nlog_warn(ni, "No spare unmapped blocks.\n");
 		return false;
 	}
@@ -1558,13 +1672,13 @@ static bool nmbm_map_block(struct nmbm_instance *ni, uint32_t lb)
 				  ni->mapping_blocks_ba);
 	if (!success) {
 		nlog_warn(ni, "No spare unmapped blocks.\n");
-		nmbm_update_info_table(ni);
 		ni->mapping_blocks_top_ba = ni->mapping_blocks_ba;
+		nmbm_update_info_table(ni);
 		return false;
 	}
 
 	ni->block_mapping[lb] = pb;
-	ni->mapping_blocks_top_ba--;
+	ni->mapping_blocks_top_ba = pb - 1;
 	ni->block_mapping_changed++;
 
 	nlog_info(ni, "Logic block %u mapped to physical block %u\n", lb, pb);
@@ -1637,14 +1751,17 @@ static bool nmbm_create_new(struct nmbm_instance *ni)
 		  ni->mgmt_start_ba, ba2addr(ni, ni->mgmt_start_ba));
 
 	/* Fill block state table & mapping table */
-	nmbm_scan_badblocks(ni);
+	success = nmbm_scan_badblocks(ni);
+	if (!success)
+		return false;
+
 	nmbm_build_mapping_table(ni);
 
 	/* Write signature */
 	ni->signature.header.magic = NMBM_MAGIC_SIGNATURE;
 	ni->signature.header.version = NMBM_VER;
 	ni->signature.header.size = sizeof(ni->signature);
-	ni->signature.nand_size = bmtd.total_blks << bmtd.blk_shift;
+	ni->signature.nand_size = (uint64_t)bmtd.total_blks << bmtd.blk_shift;
 	ni->signature.block_size = bmtd.blk_size;
 	ni->signature.page_size = bmtd.pg_size;
 	ni->signature.spare_size = bmtd.mtd->oobsize;
@@ -1687,6 +1804,11 @@ static bool nmbm_check_info_table_header(struct nmbm_instance *ni, void *data)
 	if (ifthdr->header.size != ni->info_table_size)
 		return false;
 
+	if (ifthdr->state_table_off < sizeof(*ifthdr) ||
+	    ifthdr->state_table_off > ifthdr->mapping_table_off ||
+	    ifthdr->mapping_table_off > ni->info_table_size)
+		return false;
+
 	if (ifthdr->mapping_table_off - ifthdr->state_table_off < ni->state_table_size)
 		return false;
 
@@ -1714,8 +1836,13 @@ static bool nmbm_check_info_table(struct nmbm_instance *ni, uint32_t start_ba,
 	uint32_t minimum_mapping_pb = ni->signature_ba;
 	uint32_t ba;
 
-	for (ba = 0; ba < ni->data_block_count; ba++) {
-		if ((block_mapping[ba] >= ni->data_block_count && block_mapping[ba] < end_ba) ||
+	for (ba = 0; ba < ni->signature.mgmt_start_pb; ba++) {
+		if (block_mapping[ba] < -1 ||
+		    (block_mapping[ba] >= 0 &&
+		     (uint32_t)block_mapping[ba] >= ni->block_count))
+			return false;
+
+		if ((block_mapping[ba] >= ni->signature.mgmt_start_pb && block_mapping[ba] < end_ba) ||
 		    block_mapping[ba] == ni->signature_ba)
 			return false;
 
@@ -1740,19 +1867,20 @@ static bool nmbm_check_info_table(struct nmbm_instance *ni, uint32_t start_ba,
  * nmbm_try_load_info_table - Try to load info table from a address
  * @ni: NMBM instance structure
  * @ba: start block address of the info table
+ * @limit: highest block address allowed for loading (exclusive)
  * @eba: return the block address after end of the table
  * @write_count: return the write count of this table
  * @mapping_blocks_top_ba: return the block address of top remapped block
  * @table_loaded: used to record whether ni->info_table has valid data
  */
 static bool nmbm_try_load_info_table(struct nmbm_instance *ni, uint32_t ba,
+				     uint32_t limit,
 				     uint32_t *eba, uint32_t *write_count,
 				     uint32_t *mapping_blocks_top_ba,
 				     bool table_loaded)
 {
 	struct nmbm_info_table_header *ifthdr = (void *)ni->info_table_cache;
 	uint8_t *off = ni->info_table_cache;
-	uint32_t limit = ba + size2blk(ni, ni->info_table_size);
 	uint32_t start_ba = 0, chunksize, sizeremain = ni->info_table_size;
 	bool success, checkhdr = true;
 	int ret;
@@ -1761,7 +1889,11 @@ static bool nmbm_try_load_info_table(struct nmbm_instance *ni, uint32_t ba,
 		if (nmbm_get_block_state(ni, ba) != BLOCK_ST_GOOD)
 			goto next_block;
 
-		if (nmbm_check_bad_phys_block(ni, ba)) {
+		ret = nmbm_check_bad_phys_block(ni, ba);
+		if (ret < 0)
+			return false;
+
+		if (ret) {
 			nmbm_set_block_state(ni, ba, BLOCK_ST_BAD);
 			goto next_block;
 		}
@@ -1770,11 +1902,9 @@ static bool nmbm_try_load_info_table(struct nmbm_instance *ni, uint32_t ba,
 		if (chunksize > bmtd.blk_size)
 			chunksize = bmtd.blk_size;
 
-		/* Assume block with ECC error has no info table data */
+		/* A read error invalidates this candidate but does not prove a bad block. */
 		ret = nmbn_read_data(ni, ba2addr(ni, ba), off, chunksize);
-		if (ret < 0)
-			goto skip_bad_block;
-		else if (ret > 0)
+		if (ret)
 			return false;
 
 		if (checkhdr) {
@@ -1790,10 +1920,6 @@ static bool nmbm_try_load_info_table(struct nmbm_instance *ni, uint32_t ba,
 		sizeremain -= chunksize;
 
 		goto next_block;
-
-	skip_bad_block:
-		/* Only mark bad in memory */
-		nmbm_set_block_state(ni, ba, BLOCK_ST_BAD);
 
 	next_block:
 		ba++;
@@ -1848,8 +1974,8 @@ static bool nmbm_search_info_table(struct nmbm_instance *ni, uint32_t ba,
 {
 	bool success;
 
-	while (ba < limit - size2blk(ni, ni->info_table_size)) {
-		success = nmbm_try_load_info_table(ni, ba, table_end_ba,
+	while (ba < limit) {
+		success = nmbm_try_load_info_table(ni, ba, limit, table_end_ba,
 						   write_count,
 						   mapping_blocks_top_ba,
 						   table_loaded);
@@ -1876,7 +2002,7 @@ static bool nmbm_load_info_table(struct nmbm_instance *ni, uint32_t ba,
 	uint32_t main_table_end_ba, backup_table_end_ba, table_end_ba;
 	uint32_t main_mapping_blocks_top_ba, backup_mapping_blocks_top_ba;
 	uint32_t main_table_write_count, backup_table_write_count;
-	uint32_t i;
+	uint32_t i, spare_ba;
 	bool success;
 
 	/* Set initial value */
@@ -1915,7 +2041,7 @@ static bool nmbm_load_info_table(struct nmbm_instance *ni, uint32_t ba,
 
 	/* Pick mapping_blocks_top_ba */
 	if (!ni->backup_table_ba) {
-		ni->mapping_blocks_top_ba= main_mapping_blocks_top_ba;
+		ni->mapping_blocks_top_ba = main_mapping_blocks_top_ba;
 	} else {
 		if (main_table_write_count >= backup_table_write_count)
 			ni->mapping_blocks_top_ba = main_mapping_blocks_top_ba;
@@ -1925,6 +2051,13 @@ static bool nmbm_load_info_table(struct nmbm_instance *ni, uint32_t ba,
 
 	/* Set final mapping_blocks_ba */
 	ni->mapping_blocks_ba = table_end_ba;
+	if (ni->mapping_blocks_top_ba > ni->mapping_blocks_ba) {
+		if (nmbm_block_walk(ni, false, ni->mapping_blocks_top_ba,
+				    &spare_ba, 0, ni->mapping_blocks_ba))
+			ni->mapping_blocks_top_ba = spare_ba;
+		else
+			ni->mapping_blocks_top_ba = ni->mapping_blocks_ba;
+	}
 
 	/* Set final data_block_count */
 	for (i = ni->signature.mgmt_start_pb; i > 0; i--) {
@@ -1933,6 +2066,8 @@ static bool nmbm_load_info_table(struct nmbm_instance *ni, uint32_t ba,
 			break;
 		}
 	}
+
+	ni->info_table_committed_write_count = ni->info_table.write_count;
 
 	/* Regenerate the info table cache from the final selected info table */
 	nmbm_generate_info_table_cache(ni);
@@ -1954,16 +2089,23 @@ static bool nmbm_load_info_table(struct nmbm_instance *ni, uint32_t ba,
 		success = true;
 	}
 
+	/* Persist bad blocks discovered while repairing an interrupted update. */
+	if (success &&
+	    (ni->block_state_changed || ni->block_mapping_changed))
+		success = nmbm_update_info_table(ni);
+
 	/*
 	 * If there is no spare unmapped blocks, or still only one table
 	 * exists, set the chip to read-only
 	 */
-	if (ni->mapping_blocks_ba == ni->mapping_blocks_top_ba) {
+	if (ni->mapping_blocks_top_ba <= ni->mapping_blocks_ba) {
 		nlog_warn(ni, "No spare unmapped blocks. Device is now read-only\n");
 		ni->protected = 1;
+		bmtd.mtd->flags &= ~MTD_WRITEABLE;
 	} else if (!success) {
 		nlog_warn(ni, "Only one info table found. Device is now read-only\n");
 		ni->protected = 1;
+		bmtd.mtd->flags &= ~MTD_WRITEABLE;
 	}
 
 	return true;
@@ -1997,7 +2139,10 @@ static bool nmbm_load_existing(struct nmbm_instance *ni)
 	}
 
 	/* Fill block state table & mapping table */
-	nmbm_scan_badblocks(ni);
+	success = nmbm_scan_badblocks(ni);
+	if (!success)
+		return false;
+
 	nmbm_build_mapping_table(ni);
 
 	/* Write info table(s) */
@@ -2019,11 +2164,11 @@ static bool nmbm_load_existing(struct nmbm_instance *ni)
  * Find a valid signature from a specific range in the lower NAND chip,
  * from bottom (highest address) to top (lowest address)
  *
- * Return true if found.
+ * Return 1 if found. 0 if not found, -ve if error occurs
  */
-static bool nmbm_find_signature(struct nmbm_instance *ni,
-				struct nmbm_signature *signature,
-				uint32_t *signature_ba)
+static int nmbm_find_signature(struct nmbm_instance *ni,
+			       struct nmbm_signature *signature,
+			       uint32_t *signature_ba)
 {
 	struct nmbm_signature sig;
 	uint64_t off, addr;
@@ -2038,11 +2183,15 @@ static bool nmbm_find_signature(struct nmbm_instance *ni,
 	if (ni->max_reserved_blocks && block_count - limit > ni->max_reserved_blocks)
 		limit = block_count - ni->max_reserved_blocks;
 
-	while (ba >= limit) {
+	while (ba > limit) {
 		ba--;
 		addr = ba2addr(ni, ba);
 
-		if (nmbm_check_bad_phys_block(ni, ba))
+		ret = nmbm_check_bad_phys_block(ni, ba);
+		if (ret < 0)
+			return ret;
+
+		if (ret)
 			continue;
 
 		/* Check every page.
@@ -2066,12 +2215,12 @@ static bool nmbm_find_signature(struct nmbm_instance *ni,
 				/* Found it */
 				memcpy(signature, &sig, sizeof(sig));
 				*signature_ba = ba;
-				return true;
+				return 1;
 			}
 		}
 	}
 
-	return false;
+	return 0;
 }
 
 /*
@@ -2083,6 +2232,17 @@ static size_t nmbm_calc_structure_size(void)
 	uint32_t state_table_size, mapping_table_size, info_table_size;
 	uint32_t block_count;
 
+	if (!bmtd.mtd || !bmtd.mtd->size || !bmtd.blk_size ||
+	    !bmtd.pg_size || !bmtd.mtd->oobsize || !bmtd.total_blks ||
+	    !is_power_of_2(bmtd.blk_size) ||
+	    !is_power_of_2(bmtd.pg_size) || bmtd.pg_size > bmtd.blk_size ||
+	    bmtd.blk_shift != ilog2(bmtd.blk_size) ||
+	    bmtd.pg_shift != ilog2(bmtd.pg_size) ||
+	    bmtd.blk_size != bmtd.mtd->erasesize ||
+	    bmtd.pg_size != bmtd.mtd->writesize ||
+	    ((uint64_t)bmtd.total_blks << bmtd.blk_shift) != bmtd.mtd->size)
+		return 0;
+
 	block_count = bmtd.total_blks;
 
 	/* Calculate info table size */
@@ -2090,7 +2250,7 @@ static size_t nmbm_calc_structure_size(void)
 		NMBM_BITMAP_BLOCKS_PER_UNIT) * NMBM_BITMAP_UNIT_SIZE;
 	mapping_table_size = block_count * sizeof(int32_t);
 
-	info_table_size = ALIGN(sizeof(struct nmbm_info_table_header),
+	info_table_size = ALIGN((uint32_t)sizeof(struct nmbm_info_table_header),
 				     bmtd.pg_size);
 	info_table_size += ALIGN(state_table_size, bmtd.pg_size);
 	info_table_size += ALIGN(mapping_table_size, bmtd.pg_size);
@@ -2123,7 +2283,7 @@ static void nmbm_init_structure(struct nmbm_instance *ni)
 		NMBM_BITMAP_BLOCKS_PER_UNIT) * NMBM_BITMAP_UNIT_SIZE;
 	ni->mapping_table_size = ni->block_count * sizeof(*ni->block_mapping);
 
-	ni->info_table_size = ALIGN(sizeof(ni->info_table),
+	ni->info_table_size = ALIGN((uint32_t)sizeof(ni->info_table),
 					 bmtd.pg_size);
 	ni->info_table.state_table_off = ni->info_table_size;
 
@@ -2153,10 +2313,12 @@ static void nmbm_init_structure(struct nmbm_instance *ni)
 
 	/* Initialize block state table */
 	ni->block_state_changed = 0;
+	ni->block_state_cached = 0;
 	memset(ni->block_state, 0xff, ni->state_table_size);
 
 	/* Initialize block mapping table */
 	ni->block_mapping_changed = 0;
+	ni->block_mapping_cached = 0;
 }
 
 /*
@@ -2166,6 +2328,7 @@ static void nmbm_init_structure(struct nmbm_instance *ni)
 static int nmbm_attach(struct nmbm_instance *ni)
 {
 	bool success;
+	int ret;
 
 	if (!ni)
 		return -EINVAL;
@@ -2173,8 +2336,11 @@ static int nmbm_attach(struct nmbm_instance *ni)
 	/* Initialize NMBM instance */
 	nmbm_init_structure(ni);
 
-	success = nmbm_find_signature(ni, &ni->signature, &ni->signature_ba);
-	if (!success) {
+	ret = nmbm_find_signature(ni, &ni->signature, &ni->signature_ba);
+	if (ret < 0)
+		return ret;
+
+	if (!ret) {
 		if (!ni->force_create) {
 			nlog_err(ni, "Signature not found\n");
 			return -ENODEV;
@@ -2197,11 +2363,17 @@ static int nmbm_attach(struct nmbm_instance *ni)
 		return -EINVAL;
 	}
 
-	if (ni->signature.nand_size != bmtd.total_blks << bmtd.blk_shift ||
+	if (ni->signature.nand_size != (uint64_t)bmtd.total_blks << bmtd.blk_shift ||
 	    ni->signature.block_size != bmtd.blk_size ||
 	    ni->signature.page_size != bmtd.pg_size ||
 	    ni->signature.spare_size != bmtd.mtd->oobsize) {
 		nlog_err(ni, "NMBM configuration mismatch\n");
+		return -EINVAL;
+	}
+
+	if (!ni->signature.mgmt_start_pb ||
+	    ni->signature.mgmt_start_pb >= ni->signature_ba) {
+		nlog_err(ni, "NMBM management region is invalid\n");
 		return -EINVAL;
 	}
 
@@ -2215,22 +2387,55 @@ static int nmbm_attach(struct nmbm_instance *ni)
 static bool remap_block_nmbm(u16 block, u16 mapped_block, int copy_len)
 {
 	struct nmbm_instance *ni = bmtd.ni;
-	int new_block;
+	uint32_t old_mapping_blocks_top_ba, old_mapping_changed;
+	uint32_t old_committed_write_count;
+	int32_t old_mapping;
+	int new_block, ret;
 
-	if (block >= ni->data_block_count)
+	if (ni->protected)
 		return false;
 
-	nmbm_set_block_state(ni, mapped_block, BLOCK_ST_BAD);
+	if (block >= ni->data_block_count || mapped_block >= ni->block_count ||
+	    copy_len < 0 || copy_len > bmtd.blk_size)
+		return false;
+
+	old_mapping = ni->block_mapping[block];
+	old_mapping_blocks_top_ba = ni->mapping_blocks_top_ba;
+	old_mapping_changed = ni->block_mapping_changed;
+	old_committed_write_count = ni->info_table_committed_write_count;
+
 	if (!nmbm_map_block(ni, block))
 		return false;
 
 	new_block = ni->block_mapping[block];
-	bbt_nand_erase(new_block);
-    if (copy_len > 0)
-		bbt_nand_copy(new_block, mapped_block, copy_len);
-	nmbm_update_info_table(ni);
+	ret = nmbm_erase_block_and_check(ni, new_block);
+	if (ret) {
+		if (ret > 0) {
+			nmbm_mark_phys_bad_block(ni, new_block);
+			nmbm_set_block_state(ni, new_block, BLOCK_ST_BAD);
+		}
+		goto restore_mapping;
+	}
+
+	if (copy_len > 0 && bbt_nand_copy(new_block, mapped_block, copy_len))
+		goto restore_mapping;
+
+	nmbm_set_block_state(ni, mapped_block, BLOCK_ST_BAD);
+	if (!nmbm_update_info_table(ni)) {
+		/* A table copy already committed the replacement mapping. */
+		if (ni->info_table_committed_write_count != old_committed_write_count)
+			return false;
+		goto restore_mapping;
+	}
 
 	return true;
+
+restore_mapping:
+	/* Keep the old mapping readable until its replacement is committed. */
+	ni->block_mapping[block] = old_mapping;
+	ni->mapping_blocks_top_ba = old_mapping_blocks_top_ba;
+	ni->block_mapping_changed = old_mapping_changed;
+	return false;
 }
 
 static int get_mapping_block_index_nmbm(int block)
@@ -2246,9 +2451,14 @@ static int get_mapping_block_index_nmbm(int block)
 static int mtk_bmt_init_nmbm(struct device_node *np)
 {
 	struct nmbm_instance *ni;
+	size_t structure_size;
 	int ret;
 
-	ni = kzalloc(nmbm_calc_structure_size(), GFP_KERNEL);
+	structure_size = nmbm_calc_structure_size();
+	if (!structure_size)
+		return -EINVAL;
+
+	ni = kzalloc(structure_size, GFP_KERNEL);
 	if (!ni)
 		return -ENOMEM;
 
@@ -2268,7 +2478,7 @@ static int mtk_bmt_init_nmbm(struct device_node *np)
 	if (ret)
 		goto out;
 
-	bmtd.mtd->size = ni->data_block_count << bmtd.blk_shift;
+	bmtd.mtd->size = ba2addr(ni, ni->data_block_count);
 
 	return 0;
 
@@ -2303,7 +2513,7 @@ static void unmap_block_nmbm(u16 block)
 	int start, offset;
 	int new_block;
 
-	if (block >= ni->data_block_count)
+	if (ni->protected || block >= ni->data_block_count)
 		return;
 
 	start = block;
@@ -2336,7 +2546,8 @@ static void unmap_block_nmbm(u16 block)
 
 	ni->mapping_blocks_top_ba = new_block;
 
-	nmbm_update_info_table(ni);
+	if (!nmbm_update_info_table(ni))
+		nlog_err(ni, "Failed to persist unmapped block mapping\n");
 }
 
 const struct mtk_bmt_ops mtk_bmt_nmbm_ops = {
