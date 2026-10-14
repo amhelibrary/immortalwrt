@@ -53,7 +53,7 @@
 #if KERNEL_VERSION(6, 2, 0) > LINUX_VERSION_CODE
 #define MTK_NPU_QDMA_QUEUE_MAX			(MTK_QDMA_TX_NUM)
 #else /* KERNEL_VERSION(6, 2, 0) <= LINUX_VERSION_CODE */
-#define MTK_NPU_QDMA_QUEUE_MAX			(MTK_QDMA_NUM_QUEUES)
+#define MTK_NPU_QDMA_QUEUE_MAX			(eth->soc->num_tx_queues)
 #endif /* KERNEL_VERSION(6, 2, 0) > LINUX_VERSION_CODE */
 
 struct mtk_eth *mtk_npu_netsys_get_eth(void);

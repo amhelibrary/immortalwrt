@@ -421,11 +421,12 @@ int mtk_npu_mcast_grp_insert(struct npu_mcast_addr *src,
 			     enum npu_mcast_addr_type type,
 			     u32 pqid)
 {
+	struct mtk_eth *eth = mtk_npu_netsys_get_eth();
 	struct npu_mcast_grp *grp;
 	unsigned long flags;
 	int ret = 0;
 
-	if (!src || !dst || pqid >= MTK_NPU_QDMA_QUEUE_MAX)
+	if (!eth || !src || !dst || pqid >= MTK_NPU_QDMA_QUEUE_MAX)
 		return -EINVAL;
 
 	if (!mtk_npu_mcast_network_params_is_valid(src, dst, type))
@@ -558,12 +559,13 @@ int mtk_npu_mcast_grp_update_by_idx(u32 idx,
 				    enum npu_mcast_addr_type type,
 				    u32 pqid)
 {
+	struct mtk_eth *eth = mtk_npu_netsys_get_eth();
 	struct npu_mcast_grp_params backup;
 	struct npu_mcast_grp *grp;
 	unsigned long flags;
 	int ret = 0;
 
-	if (!src || !dst ||
+	if (!eth || !src || !dst ||
 	    idx >= NPU_MCAST_TBL_IDX_MAX ||
 	    pqid >= MTK_NPU_QDMA_QUEUE_MAX)
 		return -EINVAL;
@@ -1129,6 +1131,11 @@ EXPORT_SYMBOL(mtk_npu_mcast_client_get_id_by_mac);
 
 static int mtk_npu_mcast_hnat_params_validate(struct mcast_offload_info *minfo)
 {
+	struct mtk_eth *eth = mtk_npu_netsys_get_eth();
+
+	if (!eth)
+		return -EINVAL;
+
 	if (minfo->is_ipv6) {
 		if (ipv6_addr_any(&minfo->dst.ipv6))
 			return -EINVAL;
