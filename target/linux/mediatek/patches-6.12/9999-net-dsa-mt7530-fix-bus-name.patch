@@ -1,6 +1,6 @@
 --- a/drivers/net/dsa/mt7530.c
 +++ b/drivers/net/dsa/mt7530.c
-@@ -2280,4 +2280,4 @@ mt7530_setup_mdio(struct mt7530_priv *pr
+@@ -2215,4 +2215,4 @@ mt7530_setup_mdio(struct mt7530_priv *pr
  
  	bus->priv = priv;
 -	bus->name = KBUILD_MODNAME "-mii";
@@ -8,7 +8,7 @@
 +	bus->name = "mt7530-mii";
 +	snprintf(bus->id, MII_BUS_ID_SIZE, "mt7530-%d", idx++);
  	bus->read = mt753x_phy_read_c22;
-@@ -3143,4 +3143,5 @@ static int mt7988_setup(struct dsa_switc
+@@ -3082,4 +3082,5 @@ static int mt7988_setup(struct dsa_switc
  
  	/* Reset the switch PHYs */
  	mt7530_write(priv, MT7530_SYS_CTRL, SYS_CTRL_PHY_RST);
