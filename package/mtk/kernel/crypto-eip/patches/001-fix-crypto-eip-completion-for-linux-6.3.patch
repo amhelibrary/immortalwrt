@@ -1,0 +1,90 @@
+--- a/lookaside-cipher.c
++++ b/lookaside-cipher.c
+@@ -43,7 +43,7 @@ static int mtk_crypto_skcipher_send(struct crypto_async_request *async)
+ end:
+ 	if (ret != 0) {
+ 		local_bh_disable();
+-		async->complete(async, ret);
++		crypto_request_complete(async, ret);
+ 		local_bh_enable();
+ 	}
+ 
+@@ -70,7 +70,7 @@ static int mtk_crypto_skcipher_handle_result(struct mtk_crypto_result *res, int
+ 	}
+ 
+ 	local_bh_disable();
+-	async->complete(async, err);
++	crypto_request_complete(async, err);
+ 	local_bh_enable();
+ 
+ 	crypto_free_sglist(res->eip.pkt_handle);
+@@ -92,7 +92,7 @@ static int mtk_crypto_aead_send(struct crypto_async_request *async)
+ 
+ 	if (ret != 0) {
+ 		local_bh_disable();
+-		async->complete(async, ret);
++		crypto_request_complete(async, ret);
+ 		local_bh_enable();
+ 	}
+ 
+@@ -135,7 +135,7 @@ free_dma:
+ 	crypto_free_sglist(res->dst);
+ 
+ 	local_bh_disable();
+-	async->complete(async, err);
++	crypto_request_complete(async, err);
+ 	local_bh_enable();
+ 	return 0;
+ }
+--- a/lookaside-hash.c
++++ b/lookaside-hash.c
+@@ -175,7 +175,7 @@ zero_length_hmac:
+ 	return 0;
+ exit:
+ 	local_bh_disable();
+-	async->complete(async, ret);
++	crypto_request_complete(async, ret);
+ 	local_bh_enable();
+ 
+ 	return 0;
+@@ -219,7 +219,7 @@ static int mtk_crypto_ahash_handle_result(struct mtk_crypto_result *res, int err
+ 		memcpy(req->cache, req->cache_next, cache_len);
+ 
+ 	local_bh_disable();
+-	async->complete(async, 0);
++	crypto_request_complete(async, 0);
+ 	local_bh_enable();
+ 
+ 	return 0;
+@@ -489,10 +489,9 @@ struct mtk_crypto_ahash_result {
+ };
+ 
+ #if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 3, 0))
+-static void mtk_crypto_ahash_complete(void *req, int error)
++static void mtk_crypto_ahash_complete(void *data, int error)
+ {
+-	struct crypto_async_request *areq = req;
+-	struct mtk_crypto_ahash_result *result = areq->data;
++	struct mtk_crypto_ahash_result *result = data;
+ 
+ 	if (error == -EINPROGRESS)
+ 		return;
+--- a/lookaside.c
++++ b/lookaside.c
+@@ -9,6 +9,7 @@
+ #include <linux/bitops.h>
+ #include <crypto/aes.h>
+ #include <crypto/internal/skcipher.h>
++#include <crypto/algapi.h>
+ 
+ #include "crypto-eip/crypto-eip.h"
+ #include "crypto-eip/ddk-wrapper.h"
+@@ -42,7 +43,7 @@ void mtk_crypto_dequeue(struct mtk_crypto_priv *priv, int ring)
+ 			goto finalize;
+ 
+ 		if (backlog)
+-			backlog->complete(backlog, -EINPROGRESS);
++			crypto_request_complete(backlog, -EINPROGRESS);
+ 	}
+ 
+ finalize:

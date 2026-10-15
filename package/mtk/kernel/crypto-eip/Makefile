@@ -31,6 +31,7 @@ define Build/Prepare
 	mkdir -p $(PKG_BUILD_DIR)/firmware
 	$(CP) -r `find ./firmware -maxdepth 1 | grep -v ".git"` $(PKG_BUILD_DIR)/firmware/
 	$(CP) -r `find ./src -maxdepth 1 | grep -v ".git"` $(PKG_BUILD_DIR)/
+	$(Build/Patch)
 endef
 
 define Build/Compile
