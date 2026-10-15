@@ -1,0 +1,29 @@
+From: ImmortalWrt Developer <developer@immortalwrt.org>
+Subject: [PATCH] net: ethernet: mediatek: ppe: fix null pointer dereference in mtk_flow_offload_teardown_by_tnl
+
+When CONFIG_NET_MEDIATEK_HNAT is enabled, eth->ppe[] entries in struct mtk_eth
+are not initialized by mainline mtk_eth_soc probe (since PPEs are managed
+directly by the mtkhnat driver). Additionally, unpopulated PPE entries remain
+NULL.
+
+In mtk_flow_offload_teardown_by_tnl(), eth->ppe[i] was accessed without checking
+whether ppe or ppe->foe_table is NULL, leading to an immediate kernel panic
+(unable to handle kernel access to user memory outside uaccess routines at
+virtual address 0000000000000000) when a tunnel interface goes down.
+
+Add a NULL check for ppe and ppe->foe_table before querying FOE entries.
+
+Signed-off-by: ImmortalWrt Developer <developer@immortalwrt.org>
+---
+--- a/drivers/net/ethernet/mediatek/mtk_ppe.c
++++ b/drivers/net/ethernet/mediatek/mtk_ppe.c
+@@ -1056,6 +1056,9 @@
+ 	for (i = 0; i < ARRAY_SIZE(eth->ppe); i++) {
+ 		struct mtk_ppe *ppe = eth->ppe[i];
+ 
++		if (!ppe || !ppe->foe_table)
++			continue;
++
+ 		for (j = 0; j < MTK_PPE_ENTRIES; j++) {
+ 			struct mtk_foe_entry *entry = mtk_foe_get_entry(ppe, j);
+ 			struct mtk_foe_mac_info *l2 = mtk_foe_entry_l2(eth, entry);
