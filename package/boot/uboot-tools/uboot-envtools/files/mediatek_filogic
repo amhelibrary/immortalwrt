@@ -41,8 +41,9 @@ ubootenv_add_nor_default() {
 	ubootenv_add_mtd "u-boot-env" "0x20000" "0x20000" "0x20000" "1"
 }
 
-case "$board" in
-mediatek,mt7981-rfb|\
+setup_ubootenv() {
+	case "$board" in
+	mediatek,mt7981-rfb|\
 mediatek,mt7986a-rfb|\
 mediatek,mt7986b-rfb|\
 mediatek,mt7988a-rfb)
@@ -290,7 +291,10 @@ zyxel,ex5601-t0)
 zyxel,ex5700-telenor)
 	ubootenv_add_uci_config "/dev/ubootenv" "0x0" "0x4000" "0x4000" "1"
 	;;
-esac
+	esac
+}
+
+setup_ubootenv
 
 config_load ubootenv
 config_foreach ubootenv_add_app_config
