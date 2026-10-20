@@ -1,0 +1,104 @@
+--- /dev/null	2026-10-19 12:47:11.456999746 +0800
++++ b/arch/arm64/boot/dts/mediatek/mt7988a-bananapi-bpi-r4-wifi-mt7990-mtwifi.dtso	2026-10-20 00:01:23.504840233 +0800
+@@ -0,0 +1,101 @@
++// SPDX-License-Identifier: (GPL-2.0 OR MIT)
++/*
++ * Device tree overlay for BananaPi BPI-R4 with BE14 (MT7996/MT7990)
++ * WiFi module, used with the MediaTek proprietary (mtwifi/mt_wifi7)
++ * driver.
++ *
++ * Unlike the mt76 based overlay, the proprietary driver matches the
++ * device purely by PCI vendor/device ID (0x14c3:0x7990), so no
++ * "compatible" node is required. This overlay only needs to:
++ *   1. enable the I2C mux channel carrying the WiFi MAC EEPROMs
++ *   2. provide the 12V rail feeding the WiFi module
++ *   3. expose the per-band MAC addresses
++ */
++
++/dts-v1/;
++/plugin/;
++
++#include <dt-bindings/gpio/gpio.h>
++
++/ {
++	compatible = "bananapi,bpi-r4", "mediatek,mt7988a";
++
++	fragment@0 {
++		target-path = "/";
++		__overlay__ {
++			wifi_12v: regulator-wifi-12v {
++				compatible = "regulator-fixed";
++				regulator-name = "wifi";
++				regulator-min-microvolt = <12000000>;
++				regulator-max-microvolt = <12000000>;
++				gpios = <&pio 4 GPIO_ACTIVE_HIGH>;
++				enable-active-high;
++				regulator-always-on;
++			};
++		};
++	};
++
++	fragment@1 {
++		target = <&i2c_wifi>;
++		__overlay__ {
++			status = "okay";
++
++			// 5G WIFI MAC Address EEPROM
++			wifi_eeprom@51 {
++				compatible = "atmel,24c02";
++				reg = <0x51>;
++				address-bits = <8>;
++				page-size = <8>;
++				size = <256>;
++
++				nvmem-layout {
++					compatible = "fixed-layout";
++					#address-cells = <1>;
++					#size-cells = <1>;
++
++					macaddr_5g: macaddr@0 {
++						reg = <0x0 0x6>;
++					};
++				};
++			};
++
++			// 6G WIFI MAC Address EEPROM
++			wifi_eeprom@52 {
++				compatible = "atmel,24c02";
++				reg = <0x52>;
++				address-bits = <8>;
++				page-size = <8>;
++				size = <256>;
++
++				nvmem-layout {
++					compatible = "fixed-layout";
++					#address-cells = <1>;
++					#size-cells = <1>;
++
++					macaddr_6g: macaddr@0 {
++						reg = <0x0 0x6>;
++					};
++				};
++			};
++		};
++	};
++
++	/*
++	 * The proprietary driver does not consume DT child nodes, but
++	 * keeping the PCIe endpoints described documents which slot the
++	 * BE14 module occupies and lets the MAC addresses be resolved.
++	 */
++	fragment@2 {
++		target = <&pcie0>;
++		__overlay__ {
++			status = "okay";
++		};
++	};
++
++	fragment@3 {
++		target = <&pcie1>;
++		__overlay__ {
++			status = "okay";
++		};
++	};
++};

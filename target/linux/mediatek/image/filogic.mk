@@ -681,11 +681,14 @@ define Device/bananapi_bpi-r4-common
   DEVICE_DTS_OVERLAY:= \
 	mt7988a-bananapi-bpi-r4-emmc \
 	mt7988a-bananapi-bpi-r4-rtc \
-	mt7988a-bananapi-bpi-r4-sd 
+	mt7988a-bananapi-bpi-r4-sd \
+	$(if $(CONFIG_PACKAGE_kmod-mt_wifi7),mt7988a-bananapi-bpi-r4-wifi-mt7990-mtwifi) \
+	$(if $(CONFIG_PACKAGE_kmod-mt7996e),mt7988a-bananapi-bpi-r4-wifi-be14)
   DEVICE_DTC_FLAGS := --pad 4096
   DEVICE_PACKAGES := kmod-hwmon-pwmfan kmod-i2c-mux-pca954x kmod-eeprom-at24 \
 		     kmod-rtc-pcf8563 kmod-sfp kmod-usb3 e2fsprogs f2fsck mkf2fs mt7988-wo-firmware \
-		     blkid bspconf kmod-reset-boot-count
+		     blkid bspconf kmod-reset-boot-count \
+		     $(if $(CONFIG_PACKAGE_kmod-mt_wifi7),kmod-mt_wifi7 kmod-mt_hwifi kmod-warp mtwifi-cfg luci-app-mtwifi-cfg wifi-dats)
   DEVICE_COMPAT_VERSION := 1.1
   DEVICE_COMPAT_MESSAGE := The non-switch ports were renamed to match the board/case labels
   IMAGES := sysupgrade.itb
