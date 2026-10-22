@@ -1,0 +1,10 @@
+{
+  "luci-app-hnat-traffic": {
+    "description": "Grant access to MediaTek HNAT MIB Traffic Statistics",
+    "read": {
+      "file": {
+        "/usr/bin/hnat_mib_stat": [ "exec" ]
+      }
+    }
+  }
+}

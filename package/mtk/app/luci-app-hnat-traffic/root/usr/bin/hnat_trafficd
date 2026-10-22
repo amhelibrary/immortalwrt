@@ -1,0 +1,443 @@
+#!/usr/bin/env lua
+-- MediaTek Filogic 880 (MT7988) PPE Hardware MIB Traffic Background Daemon
+-- Continuous Realtime Dual-Stack Traffic Accounting & Cache Publisher
+
+local jsonc_ok, jsonc = pcall(require, "luci.jsonc")
+
+local ALL_ENTRY_PATH = "/sys/kernel/debug/hnat/all_entry"
+local DB_PATH = "/tmp/hnat_mib_host_store.json"
+local CACHE_PATH = "/tmp/hnat_traffic_cache.json"
+local CACHE_TMP = "/tmp/hnat_traffic_cache.json.tmp"
+
+local function ensure_debugfs()
+    local f = io.open(ALL_ENTRY_PATH, "r")
+    if f then
+        f:close()
+        return true
+    end
+    os.execute("mount -t debugfs none /sys/kernel/debug 2>/dev/null")
+    f = io.open(ALL_ENTRY_PATH, "r")
+    if f then
+        f:close()
+        return true
+    end
+    return false
+end
+
+local function read_file(path)
+    local f = io.open(path, "r")
+    if not f then return nil end
+    local content = f:read("*a")
+    f:close()
+    return content
+end
+
+local function is_private_ipv4(ip)
+    if not ip or ip == "0.0.0.0" then return true end
+    if ip:match("^192%.168%.") then return true end
+    if ip:match("^10%.") then return true end
+    if ip:match("^127%.") then return true end
+    local a, b = ip:match("^172%.(%d+)%.")
+    if a and b then
+        local num = tonumber(b)
+        if num and num >= 16 and num <= 31 then return true end
+    end
+    return false
+end
+
+local function discover_lan_hosts()
+    local hosts = {}
+    local mac_to_host = {}
+    local ip_to_mac = {}
+
+    local dhcp_content = read_file("/tmp/dhcp.leases")
+    if dhcp_content then
+        for line in dhcp_content:gmatch("[^\r\n]+") do
+            local ts, mac, ip, name = line:match("(%d+)%s+([%w:]+)%s+([%d%.]+)%s+([^%s]+)")
+            if mac and ip then
+                mac = mac:lower()
+                local h = {
+                    ip = ip,
+                    ipv6 = "",
+                    mac = mac,
+                    hostname = (name and name ~= "*") and name or "unknown",
+                    v4_rx_bytes = 0,
+                    v4_tx_bytes = 0,
+                    v4_rx_pkts = 0,
+                    v4_tx_pkts = 0,
+                    v4_rx_rate_bps = 0,
+                    v4_tx_rate_bps = 0,
+                    v6_rx_bytes = 0,
+                    v6_tx_bytes = 0,
+                    v6_rx_pkts = 0,
+                    v6_tx_pkts = 0,
+                    v6_rx_rate_bps = 0,
+                    v6_tx_rate_bps = 0,
+                    rx_bytes = 0,
+                    tx_bytes = 0,
+                    rx_rate_bps = 0,
+                    tx_rate_bps = 0,
+                    active_conns = 0,
+                    source = "DHCP"
+                }
+                hosts[ip] = h
+                mac_to_host[mac] = h
+                ip_to_mac[ip] = mac
+            end
+        end
+    end
+
+    local arp_content = read_file("/proc/net/arp")
+    if arp_content then
+        for line in arp_content:gmatch("[^\r\n]+") do
+            local ip, hw_type, flags, mac, mask, dev =
+                line:match("([%d%.]+)%s+(0x%x+)%s+(0x%x+)%s+([%w:]+)%s+([%*%w]+)%s+([%w%-%._]+)")
+            if ip and mac and dev == "br-lan" and ip ~= "192.168.10.1" and mac ~= "00:00:00:00:00:00" then
+                mac = mac:lower()
+                if not hosts[ip] then
+                    local h = {
+                        ip = ip,
+                        ipv6 = "",
+                        mac = mac,
+                        hostname = "Static-Client",
+                        v4_rx_bytes = 0,
+                        v4_tx_bytes = 0,
+                        v4_rx_pkts = 0,
+                        v4_tx_pkts = 0,
+                        v4_rx_rate_bps = 0,
+                        v4_tx_rate_bps = 0,
+                        v6_rx_bytes = 0,
+                        v6_tx_bytes = 0,
+                        v6_rx_pkts = 0,
+                        v6_tx_pkts = 0,
+                        v6_rx_rate_bps = 0,
+                        v6_tx_rate_bps = 0,
+                        rx_bytes = 0,
+                        tx_bytes = 0,
+                        rx_rate_bps = 0,
+                        tx_rate_bps = 0,
+                        active_conns = 0,
+                        source = "ARP"
+                    }
+                    hosts[ip] = h
+                    mac_to_host[mac] = h
+                end
+                ip_to_mac[ip] = mac
+            end
+        end
+    end
+
+    local p = io.popen("ip -6 neigh show dev br-lan 2>/dev/null")
+    if p then
+        for line in p:lines() do
+            local ip6, mac = line:match("([%w:]+)%s+.-lladdr%s+([%w:]+)")
+            if ip6 and mac and not line:find("FAILED") then
+                mac = mac:lower()
+                local h = mac_to_host[mac]
+                if h then
+                    if not ip6:match("^fe80:") then
+                        if h.ipv6 == "" or h.ipv6:match("^fe80:") then
+                            h.ipv6 = ip6
+                        elseif ip6:match("^2") and not h.ipv6:match("^2") then
+                            h.ipv6 = ip6
+                        end
+                    elseif h.ipv6 == "" then
+                        h.ipv6 = ip6
+                    end
+                end
+            end
+        end
+        p:close()
+    end
+
+    return hosts, mac_to_host, ip_to_mac
+end
+
+local function load_db()
+    local content = read_file(DB_PATH)
+    if not content then return {}, {}, os.time() end
+    if jsonc_ok and jsonc then
+        local data = jsonc.parse(content)
+        if data and type(data) == "table" then
+            return data.host_totals or {}, data.flow_baselines or {}, data.timestamp or os.time()
+        end
+    end
+    return {}, {}, os.time()
+end
+
+local function save_db(host_totals, flow_baselines, now)
+    local data = {
+        timestamp = now,
+        host_totals = host_totals,
+        flow_baselines = flow_baselines
+    }
+    local f = io.open(DB_PATH, "w")
+    if not f then return end
+    if jsonc_ok and jsonc then
+        f:write(jsonc.stringify(data, true))
+    end
+    f:close()
+end
+
+local function step_cycle(hosts, mac_to_host, ip_to_mac, host_totals, flow_baselines, last_time)
+    local f = io.open(ALL_ENTRY_PATH, "r")
+    if not f then return host_totals, flow_baselines, last_time end
+
+    local now = os.time()
+    local dt = now - last_time
+    if dt <= 0 then dt = 2 end
+
+    for ip, h in pairs(hosts) do
+        local rec = host_totals[ip]
+        if rec then
+            h.v4_rx_bytes = rec.v4_rx_bytes or rec.rx_bytes or 0
+            h.v4_tx_bytes = rec.v4_tx_bytes or rec.tx_bytes or 0
+            h.v4_rx_pkts  = rec.v4_rx_pkts or 0
+            h.v4_tx_pkts  = rec.v4_tx_pkts or 0
+            h.v6_rx_bytes = rec.v6_rx_bytes or 0
+            h.v6_tx_bytes = rec.v6_tx_bytes or 0
+            h.v6_rx_pkts  = rec.v6_rx_pkts or 0
+            h.v6_tx_pkts  = rec.v6_tx_pkts or 0
+        else
+            host_totals[ip] = {
+                v4_rx_bytes = 0, v4_tx_bytes = 0, v4_rx_pkts = 0, v4_tx_pkts = 0,
+                v6_rx_bytes = 0, v6_tx_bytes = 0, v6_rx_pkts = 0, v6_tx_pkts = 0
+            }
+        end
+    end
+
+    local current_baselines = {}
+    local active_flow_cnt = 0
+    local total_hardware_bytes = 0
+    local total_hardware_pkts  = 0
+    local top_flows = {}
+
+    local delta_v4_rx = {}
+    local delta_v4_tx = {}
+    local delta_v6_rx = {}
+    local delta_v6_tx = {}
+
+    for ip, _ in pairs(hosts) do
+        delta_v4_rx[ip] = 0
+        delta_v4_tx[ip] = 0
+        delta_v6_rx[ip] = 0
+        delta_v6_tx[ip] = 0
+    end
+
+    for line in f:lines() do
+        local b_str, p_str, ppe_id, idx_str, state, type_str =
+            line:match("bytes=(%d+)|packets=(%d+)|addr=0x%x+|ppe=(%d+)|index=(%d+)|state=([%w_]+)|type=([%w_]+)")
+
+        if b_str and idx_str and state == "BIND" then
+            local bytes = tonumber(b_str) or 0
+            local pkts  = tonumber(p_str) or 0
+            local ppe   = tonumber(ppe_id) or 0
+            local index = tonumber(idx_str) or 0
+
+            local smac = line:match("smac=([%w:]+)")
+            local dmac = line:match("dmac=([%w:]+)")
+            if smac then smac = smac:lower() end
+            if dmac then dmac = dmac:lower() end
+
+            local target_ip = nil
+            local dir = nil
+            local is_ipv6 = type_str and type_str:find("IPV6")
+            local prot = line:match("prot=(%d+)") == "17" and "UDP" or "TCP"
+
+            local src_disp = ""
+            local dst_disp = ""
+
+            if not is_ipv6 then
+                local sip, sport = line:match("SIP=([%d%.]+)%(sp=(%d+)%)")
+                local dip, dport = line:match("%->DIP=([%d%.]+)%(dp=(%d+)%)")
+                local nsip, nsport = line:match("=>NSIP=([%d%.]+)%(sp=(%d+)%)")
+                local ndip, ndport = line:match("%->NDIP=([%d%.]+)%(dp=(%d+)%)")
+
+                sip = sip or line:match("SIP=([%d%.]+)")
+                dip = dip or line:match("DIP=([%d%.]+)")
+                ndip = ndip or line:match("NDIP=([%d%.]+)")
+                sport = sport or "0"
+                dport = dport or "0"
+                ndport = ndport or dport
+
+                if ndip and hosts[ndip] and sip and not is_private_ipv4(sip) then
+                    target_ip = ndip
+                    dir = "RX"
+                    src_disp = sip .. ":" .. sport
+                    dst_disp = ndip .. ":" .. ndport
+                elseif sip and hosts[sip] and dip and not is_private_ipv4(dip) then
+                    target_ip = sip
+                    dir = "TX"
+                    src_disp = sip .. ":" .. sport
+                    dst_disp = dip .. ":" .. dport
+                end
+            else
+                if dmac and mac_to_host[dmac] and not dmac:match("^33:33") then
+                    target_ip = mac_to_host[dmac].ip
+                    dir = "RX"
+                elseif smac and mac_to_host[smac] then
+                    target_ip = mac_to_host[smac].ip
+                    dir = "TX"
+                end
+
+                local s6 = line:match("SIP=([%w:]+)") or "IPv6-Src"
+                local d6 = line:match("DIP=([%w:]+)") or "IPv6-Dst"
+                src_disp = s6:sub(1, 18) .. ".."
+                dst_disp = d6:sub(1, 18) .. ".."
+            end
+
+            if target_ip and dir and bytes > 0 then
+                local h = hosts[target_ip]
+                h.active_conns = h.active_conns + 1
+                active_flow_cnt = active_flow_cnt + 1
+
+                total_hardware_bytes = total_hardware_bytes + bytes
+                total_hardware_pkts  = total_hardware_pkts + pkts
+
+                local fkey = string.format("%d:%d:%s:%s", ppe, index, dir, is_ipv6 and "v6" or "v4")
+
+                local prev = flow_baselines[fkey]
+                local delta_b = 0
+                local delta_p = 0
+
+                if prev then
+                    if bytes >= prev.bytes then
+                        delta_b = bytes - prev.bytes
+                        delta_p = pkts  - prev.pkts
+                    else
+                        delta_b = bytes
+                        delta_p = pkts
+                    end
+                else
+                    delta_b = 0
+                    delta_p = 0
+                end
+
+                current_baselines[fkey] = {
+                    bytes = bytes,
+                    pkts  = pkts,
+                    ts    = now
+                }
+
+                if delta_b > 0 then
+                    if not is_ipv6 then
+                        if dir == "RX" then
+                            host_totals[target_ip].v4_rx_bytes = (host_totals[target_ip].v4_rx_bytes or 0) + delta_b
+                            host_totals[target_ip].v4_rx_pkts  = (host_totals[target_ip].v4_rx_pkts or 0) + delta_p
+                            delta_v4_rx[target_ip] = (delta_v4_rx[target_ip] or 0) + delta_b
+                        else
+                            host_totals[target_ip].v4_tx_bytes = (host_totals[target_ip].v4_tx_bytes or 0) + delta_b
+                            host_totals[target_ip].v4_tx_pkts  = (host_totals[target_ip].v4_tx_pkts or 0) + delta_p
+                            delta_v4_tx[target_ip] = (delta_v4_tx[target_ip] or 0) + delta_b
+                        end
+                    else
+                        if dir == "RX" then
+                            host_totals[target_ip].v6_rx_bytes = (host_totals[target_ip].v6_rx_bytes or 0) + delta_b
+                            host_totals[target_ip].v6_rx_pkts  = (host_totals[target_ip].v6_rx_pkts or 0) + delta_p
+                            delta_v6_rx[target_ip] = (delta_v6_rx[target_ip] or 0) + delta_b
+                        else
+                            host_totals[target_ip].v6_tx_bytes = (host_totals[target_ip].v6_tx_bytes or 0) + delta_b
+                            host_totals[target_ip].v6_tx_pkts  = (host_totals[target_ip].v6_tx_pkts or 0) + delta_p
+                            delta_v6_tx[target_ip] = (delta_v6_tx[target_ip] or 0) + delta_b
+                        end
+                    end
+                end
+
+                -- Bound Top Flows up to 50 max
+                if #top_flows < 50 and bytes > 1024 then
+                    table.insert(top_flows, {
+                        index = index,
+                        ppe = ppe,
+                        proto = (is_ipv6 and "IPv6/" or "IPv4/") .. prot,
+                        src = src_disp,
+                        dst = dst_disp,
+                        bytes = bytes,
+                        packets = pkts,
+                        state = state,
+                        dir = dir,
+                        target_ip = target_ip
+                    })
+                end
+            end
+        end
+    end
+    f:close()
+
+    for fkey, prev in pairs(flow_baselines) do
+        if not current_baselines[fkey] then
+            if (now - (prev.ts or 0)) < 60 then
+                current_baselines[fkey] = prev
+            end
+        end
+    end
+
+    for ip, h in pairs(hosts) do
+        local tot = host_totals[ip] or {}
+        h.v4_rx_bytes = tot.v4_rx_bytes or 0
+        h.v4_tx_bytes = tot.v4_tx_bytes or 0
+        h.v4_rx_pkts  = tot.v4_rx_pkts or 0
+        h.v4_tx_pkts  = tot.v4_tx_pkts or 0
+
+        h.v6_rx_bytes = tot.v6_rx_bytes or 0
+        h.v6_tx_bytes = tot.v6_tx_bytes or 0
+        h.v6_rx_pkts  = tot.v6_rx_pkts or 0
+        h.v6_tx_pkts  = tot.v6_tx_pkts or 0
+
+        h.rx_bytes = h.v4_rx_bytes + h.v6_rx_bytes
+        h.tx_bytes = h.v4_tx_bytes + h.v6_tx_bytes
+
+        local dv4_rx = delta_v4_rx[ip] or 0
+        local dv4_tx = delta_v4_tx[ip] or 0
+        local dv6_rx = delta_v6_rx[ip] or 0
+        local dv6_tx = delta_v6_tx[ip] or 0
+
+        h.v4_rx_rate_bps = math.floor((dv4_rx * 8) / dt)
+        h.v4_tx_rate_bps = math.floor((dv4_tx * 8) / dt)
+        h.v6_rx_rate_bps = math.floor((dv6_rx * 8) / dt)
+        h.v6_tx_rate_bps = math.floor((dv6_tx * 8) / dt)
+
+        h.rx_rate_bps = h.v4_rx_rate_bps + h.v6_rx_rate_bps
+        h.tx_rate_bps = h.v4_tx_rate_bps + h.v6_tx_rate_bps
+    end
+
+    table.sort(top_flows, function(a, b) return a.bytes > b.bytes end)
+
+    save_db(host_totals, current_baselines, now)
+
+    -- Publish Atomic Cache JSON for instant frontend loading
+    local payload = {
+        timestamp = now,
+        interval = dt,
+        hosts = hosts,
+        total_hardware_bytes = total_hardware_bytes,
+        total_hardware_pkts  = total_hardware_pkts,
+        active_flows = active_flow_cnt,
+        top_flows = top_flows
+    }
+
+    if jsonc_ok and jsonc then
+        local cf = io.open(CACHE_TMP, "w")
+        if cf then
+            cf:write(jsonc.stringify(payload, true))
+            cf:close()
+            os.rename(CACHE_TMP, CACHE_PATH)
+        end
+    end
+
+    return host_totals, current_baselines, now
+end
+
+-- Daemon Main Loop
+if not ensure_debugfs() then
+    io.stderr:write("Error: debugfs hnat node missing\n")
+    os.exit(1)
+end
+
+local host_totals, flow_baselines, last_time = load_db()
+
+while true do
+    local hosts, mac_to_host, ip_to_mac = discover_lan_hosts()
+    host_totals, flow_baselines, last_time =
+        step_cycle(hosts, mac_to_host, ip_to_mac, host_totals, flow_baselines, last_time)
+    os.execute("sleep 2")
+end

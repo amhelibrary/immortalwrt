@@ -1,0 +1,161 @@
+msgid ""
+msgstr "Content-Type: text/plain; charset=UTF-8"
+
+#: htdocs/luci-static/resources/view/hnat_traffic.js:107
+msgid "Active Connections"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/hnat_traffic.js:65
+msgid "Active Hardware Flows (BIND)"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/hnat_traffic.js:45
+msgid ""
+"Based on MediaTek Filogic 880 (MT7988) PPE ASIC hardware MIB counters, "
+"providing lossless sub-second flow polling and high-precision LAN client "
+"traffic monitoring."
+msgstr ""
+
+#: htdocs/luci-static/resources/view/hnat_traffic.js:128
+msgid "Bytes"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/hnat_traffic.js:127
+msgid "Destination Address"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/hnat_traffic.js:130
+msgid "Direction"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/hnat_traffic.js:108
+msgid "Discovery Method"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/hnat_traffic.js:156
+msgid "Display Limit:"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/hnat_traffic.js:372
+msgid "Download (Rx)"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/hnat_traffic.js:80
+msgid "Driver Architecture"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/hnat_traffic.js:124
+msgid "Flow Entry Index"
+msgstr ""
+
+#: root/usr/share/rpcd/acl.d/luci-app-hnat-traffic.json:3
+msgid "Grant access to MediaTek HNAT MIB Traffic Statistics"
+msgstr ""
+
+#: root/usr/share/luci/menu.d/luci-app-hnat-traffic.json:3
+msgid "HNAT Hardware Traffic"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/hnat_traffic.js:71
+msgid "Hardware Acceleration Overview"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/hnat_traffic.js:78
+msgid "Hardware Engine"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/hnat_traffic.js:84
+msgid "Hardware Flow Capacity"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/hnat_traffic.js:92
+msgid "Hardware Specifications"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/hnat_traffic.js:101
+msgid "Hostname"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/hnat_traffic.js:102
+msgid "IP Address (IPv4 / IPv6)"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/hnat_traffic.js:115
+msgid "LAN Clients Traffic Statistics"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/hnat_traffic.js:103
+msgid "MAC Address"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/hnat_traffic.js:44
+msgid "MediaTek HNAT Hardware Traffic Statistics"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/hnat_traffic.js:232
+msgid "No active LAN devices found"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/hnat_traffic.js:351
+msgid "No active hardware flow data"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/hnat_traffic.js:129
+msgid "Packets"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/hnat_traffic.js:125
+msgid "Protocol"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/hnat_traffic.js:104
+msgid "Realtime Rate (Download / Upload)"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/hnat_traffic.js:126
+msgid "Source Address"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/hnat_traffic.js:131
+msgid "State"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/hnat_traffic.js:154
+msgid "Top Active Hardware Flows"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/hnat_traffic.js:61
+msgid "Total Hardware Volume"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/hnat_traffic.js:53
+msgid "Total Realtime Download Rate"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/hnat_traffic.js:57
+msgid "Total Realtime Upload Rate"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/hnat_traffic.js:105
+msgid "Total Traffic (Download / Upload)"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/hnat_traffic.js:106
+msgid "Total Traffic (IPv4 + IPv6)"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/hnat_traffic.js:86
+msgid "Update Interval"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/hnat_traffic.js:372
+msgid "Upload (Tx)"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/hnat_traffic.js:222
+msgid "flows"
+msgstr ""
+
+#: htdocs/luci-static/resources/view/hnat_traffic.js:367
+msgid "pkts"
+msgstr ""

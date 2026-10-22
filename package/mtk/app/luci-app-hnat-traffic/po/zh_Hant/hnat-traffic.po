@@ -1,0 +1,124 @@
+msgid ""
+msgstr ""
+"Project-Id-Version: luci-app-hnat-traffic 1.0.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Language: zh_Hant\n"
+"Plural-Forms: nplurals=1; plural=0;\n"
+
+msgid "HNAT Hardware Traffic"
+msgstr "HNAT 硬體流量統計"
+
+msgid "Grant access to MediaTek HNAT MIB Traffic Statistics"
+msgstr "授權存取 MediaTek HNAT MIB 流量統計"
+
+msgid "MediaTek HNAT Hardware Traffic Statistics"
+msgstr "MediaTek HNAT 硬體流量統計"
+
+msgid "Based on MediaTek Filogic 880 (MT7988) PPE ASIC hardware MIB counters, providing lossless sub-second flow polling and high-precision LAN client traffic monitoring."
+msgstr "基於 MediaTek Filogic 880 (MT7988) PPE ASIC 硬體 MIB 計數器，提供毫秒級無損硬體流表輪詢與區域網路終端高精度上下行流量監控。"
+
+msgid "Total Realtime Download Rate"
+msgstr "全網即時下載速率"
+
+msgid "Total Realtime Upload Rate"
+msgstr "全網即時上傳速率"
+
+msgid "Total Hardware Volume"
+msgstr "硬體加速吞吐總量"
+
+msgid "Active Hardware Flows (BIND)"
+msgstr "活躍硬體加速流 (BIND)"
+
+msgid "Hardware Acceleration Overview"
+msgstr "硬體加速全局概覽"
+
+msgid "Hardware Engine"
+msgstr "硬體加速引擎"
+
+msgid "Driver Architecture"
+msgstr "加速驅動架構"
+
+msgid "Hardware Flow Capacity"
+msgstr "硬體流表最大容量"
+
+msgid "Update Interval"
+msgstr "統計更新週期"
+
+msgid "Hardware Specifications"
+msgstr "硬體子系統參數"
+
+msgid "LAN Clients Traffic Statistics"
+msgstr "區域網路終端硬體流量統計"
+
+msgid "Hostname"
+msgstr "主機名稱"
+
+msgid "IP Address (IPv4 / IPv6)"
+msgstr "IP 位址 (支援 IPv4 / IPv6)"
+
+msgid "MAC Address"
+msgstr "MAC 位址"
+
+msgid "Realtime Rate (Download / Upload)"
+msgstr "即時速率 (下載 / 上傳)"
+
+msgid "Total Traffic (Download / Upload)"
+msgstr "總流量 (下載 / 上傳)"
+
+msgid "Total Traffic (IPv4 + IPv6)"
+msgstr "總流量 (IPv4+IPv6)"
+
+msgid "Active Connections"
+msgstr "活動連線"
+
+msgid "Discovery Method"
+msgstr "裝置發現方式"
+
+msgid "Top Active Hardware Flows"
+msgstr "目前活躍硬體加速流"
+
+msgid "Display Limit:"
+msgstr "顯示數量:"
+
+msgid "Flow Entry Index"
+msgstr "表項編號"
+
+msgid "Protocol"
+msgstr "通訊協定"
+
+msgid "Source Address"
+msgstr "來源位址"
+
+msgid "Destination Address"
+msgstr "目的位址"
+
+msgid "Bytes"
+msgstr "位元組"
+
+msgid "Packets"
+msgstr "封包數"
+
+msgid "Direction"
+msgstr "方向"
+
+msgid "State"
+msgstr "狀態"
+
+msgid "Download (Rx)"
+msgstr "下載 (Rx)"
+
+msgid "Upload (Tx)"
+msgstr "上傳 (Tx)"
+
+msgid "flows"
+msgstr "條"
+
+msgid "pkts"
+msgstr "包"
+
+msgid "No active LAN devices found"
+msgstr "暫未發現活躍區域網路終端設備"
+
+msgid "No active hardware flow data"
+msgstr "暫無活躍硬體加速流資料"

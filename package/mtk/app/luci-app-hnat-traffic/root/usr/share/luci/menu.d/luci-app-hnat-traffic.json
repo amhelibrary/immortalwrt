@@ -1,0 +1,13 @@
+{
+  "admin/status/hnat_traffic": {
+    "title": "HNAT Hardware Traffic",
+    "order": 55,
+    "action": {
+      "type": "view",
+      "path": "hnat_traffic"
+    },
+    "depends": {
+      "acl": [ "luci-app-hnat-traffic" ]
+    }
+  }
+}

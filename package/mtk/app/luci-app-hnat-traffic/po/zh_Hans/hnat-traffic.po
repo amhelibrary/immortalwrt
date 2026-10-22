@@ -1,0 +1,124 @@
+msgid ""
+msgstr ""
+"Project-Id-Version: luci-app-hnat-traffic 1.0.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Language: zh_Hans\n"
+"Plural-Forms: nplurals=1; plural=0;\n"
+
+msgid "HNAT Hardware Traffic"
+msgstr "HNAT 硬件流量统计"
+
+msgid "Grant access to MediaTek HNAT MIB Traffic Statistics"
+msgstr "授权访问 MediaTek HNAT MIB 流量统计"
+
+msgid "MediaTek HNAT Hardware Traffic Statistics"
+msgstr "MediaTek HNAT 硬件流量统计"
+
+msgid "Based on MediaTek Filogic 880 (MT7988) PPE ASIC hardware MIB counters, providing lossless sub-second flow polling and high-precision LAN client traffic monitoring."
+msgstr "基于 MediaTek Filogic 880 (MT7988) PPE ASIC 硬件 MIB 计数器，提供毫秒级无损硬件流表轮询与局域网终端高精度上下行流量监控。"
+
+msgid "Total Realtime Download Rate"
+msgstr "全网实时下载速率"
+
+msgid "Total Realtime Upload Rate"
+msgstr "全网实时上传速率"
+
+msgid "Total Hardware Volume"
+msgstr "硬件加速吞吐总量"
+
+msgid "Active Hardware Flows (BIND)"
+msgstr "活跃硬件加速流 (BIND)"
+
+msgid "Hardware Acceleration Overview"
+msgstr "硬件加速全局概览"
+
+msgid "Hardware Engine"
+msgstr "硬件加速引擎"
+
+msgid "Driver Architecture"
+msgstr "加速驱动架构"
+
+msgid "Hardware Flow Capacity"
+msgstr "硬件流表最大容量"
+
+msgid "Update Interval"
+msgstr "统计更新周期"
+
+msgid "Hardware Specifications"
+msgstr "硬件子系统参数"
+
+msgid "LAN Clients Traffic Statistics"
+msgstr "局域网终端硬件流量统计"
+
+msgid "Hostname"
+msgstr "主机名"
+
+msgid "IP Address (IPv4 / IPv6)"
+msgstr "IP 地址 (支持 IPv4 / IPv6)"
+
+msgid "MAC Address"
+msgstr "MAC 地址"
+
+msgid "Realtime Rate (Download / Upload)"
+msgstr "实时速率 (下载 / 上传)"
+
+msgid "Total Traffic (Download / Upload)"
+msgstr "总流量 (下载 / 上传)"
+
+msgid "Total Traffic (IPv4 + IPv6)"
+msgstr "总流量 (IPv4+IPv6)"
+
+msgid "Active Connections"
+msgstr "活动连接"
+
+msgid "Discovery Method"
+msgstr "设备发现方式"
+
+msgid "Top Active Hardware Flows"
+msgstr "当前活跃硬件加速流"
+
+msgid "Display Limit:"
+msgstr "显示数量:"
+
+msgid "Flow Entry Index"
+msgstr "表项序号"
+
+msgid "Protocol"
+msgstr "协议"
+
+msgid "Source Address"
+msgstr "源地址"
+
+msgid "Destination Address"
+msgstr "目的地址"
+
+msgid "Bytes"
+msgstr "字节数"
+
+msgid "Packets"
+msgstr "数据包"
+
+msgid "Direction"
+msgstr "方向"
+
+msgid "State"
+msgstr "状态"
+
+msgid "Download (Rx)"
+msgstr "下载 (Rx)"
+
+msgid "Upload (Tx)"
+msgstr "上传 (Tx)"
+
+msgid "flows"
+msgstr "条"
+
+msgid "pkts"
+msgstr "包"
+
+msgid "No active LAN devices found"
+msgstr "暂未发现活跃局域网终端设备"
+
+msgid "No active hardware flow data"
+msgstr "暂无活跃硬件加速流数据"
