@@ -1118,6 +1118,8 @@ struct mtk_hnat {
 	struct hlist_head *foe_flow[MAX_PPE_NUM];
 	struct hnat_prot_3t_cfg prot_3t[MAX_PPE_NUM]; /* for 3-tuple offload */
 	struct hnat_neigh_update neigh_update;
+	atomic64_t hash_collision_cnt[MAX_PPE_NUM];
+	bool hash_collision_en;
 	int fe_irq2;
 };
 

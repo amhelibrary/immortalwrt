@@ -335,7 +335,35 @@ static int entry_set_usage(int level)
 	pr_info("              8   <mac>        Delete all PPEs foe entry of assinged smac and dmac\n");
 	pr_info("              9   <ip>         Delete all PPEs foe entry of assinged IP(DL and UL)\n");
 	pr_info("              10  <ipV6>       Delete all PPEs foe entry of assinged IPv6(DL and UL)\n");
+	pr_info("              11      0~2      Hash collision packet counter (0:disable; 1:enable; 2:clear), current=%d\n",
+		hnat_priv->hash_collision_en);
 
+	return 0;
+}
+
+/* op: 0 = disable (keep counts), 1 = clear counts and enable,
+ *     2 = clear counts only (keep current enable state)
+ */
+static int entry_set_hash_collision(int op)
+{
+	int i;
+
+	if (op < 0 || op > 2) {
+		pr_info("hash collision: invalid option %d\n", op);
+		return -EINVAL;
+	}
+
+	/* reset all hash collision counters */
+	if (op == 1 || op == 2)
+		for (i = 0; i < MAX_PPE_NUM; i++)
+			atomic64_set(&hnat_priv->hash_collision_cnt[i], 0);
+
+	/* update enable state */
+	if (op == 0 || op == 1)
+		hnat_priv->hash_collision_en = op;
+
+	pr_info("hash collision packet counter %s\n",
+		hnat_priv->hash_collision_en ? "enabled" : "disabled");
 	return 0;
 }
 
@@ -1092,6 +1120,7 @@ static const debugfs_write_func entry_set_func[] = {
 	[5] = wrapped_ppe1_entry_delete,
 	[6] = wrapped_ppe2_entry_detail,
 	[7] = wrapped_ppe2_entry_delete,
+	[11] = entry_set_hash_collision,
 };
 
 static const debugfs_write_func cr_set_func[] = {
@@ -2159,6 +2188,10 @@ static int __hnat_entry_read(struct seq_file *m, void *private, u32 ppe_id)
 		   "BIND" : dbg_entry_state == 3 ?
 		   "FIN" : "Unknown", cnt);
 
+	if (h->hash_collision_en)
+		seq_printf(m, "Hash collision packet cnt = %lld\n",
+			   atomic64_read(&h->hash_collision_cnt[ppe_id]));
+
 	return 0;
 }
 
@@ -2210,6 +2243,7 @@ static ssize_t hnat_entry_write(struct file *file, const char __user *buffer,
 	case 5:
 	case 6:
 	case 7:
+	case 11:
 		p_token = strsep(&p_buf, p_delimiter);
 		if (!p_token)
 			arg1 = 0;
