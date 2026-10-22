@@ -18,8 +18,8 @@
 #endif // HNAT
 
 static unsigned int
-mtk_crypto_ipv4_nf_pre_routing(void *priv, struct sk_buff *skb,
-			     const struct nf_hook_state *state)
+mtk_crypto_nf_pre_routing(void *priv, struct sk_buff *skb,
+			  const struct nf_hook_state *state)
 {
 #if IS_ENABLED(CONFIG_NET_MEDIATEK_HNAT)
 	struct xfrm_params_list *xfrm_params_list;
@@ -49,8 +49,14 @@ mtk_crypto_ipv4_nf_pre_routing(void *priv, struct sk_buff *skb,
 
 static struct nf_hook_ops mtk_crypto_nf_ops[] __read_mostly = {
 	{
-		.hook = mtk_crypto_ipv4_nf_pre_routing,
+		.hook = mtk_crypto_nf_pre_routing,
 		.pf = NFPROTO_IPV4,
+		.hooknum = NF_INET_PRE_ROUTING,
+		.priority = NF_IP_PRI_FIRST + 1,
+	},
+	{
+		.hook = mtk_crypto_nf_pre_routing,
+		.pf = NFPROTO_IPV6,
 		.hooknum = NF_INET_PRE_ROUTING,
 		.priority = NF_IP_PRI_FIRST + 1,
 	},

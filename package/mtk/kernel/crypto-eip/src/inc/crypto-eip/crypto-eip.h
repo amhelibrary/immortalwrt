@@ -163,6 +163,7 @@ static inline struct xfrm_params_list *mtk_xfrm_params_list_get(void)
 #if defined(CONFIG_CRYPTO_OFFLOAD_INLINE_FLOWBLOCK)
 int mtk_crypto_xfrm_get_cdrt(struct xfrm_state *xs);
 #endif /* Flow Block */
+void mtk_crypto_decrypt_sec_path_setup(struct sk_buff *skb, u16 cdrt);
 
 extern void mtk_update_dtls_param(struct DTLS_param *DTLSParam_p, int TnlIdx);
 extern void mtk_remove_dtls_param(struct DTLS_param *DTLSParam_p, int TnlIdx);

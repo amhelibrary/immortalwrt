@@ -76,6 +76,49 @@ int mtk_crypto_xfrm_get_cdrt(struct xfrm_state *xs)
 }
 #endif // Flow_Block
 
+void mtk_crypto_decrypt_sec_path_setup(struct sk_buff *skb, u16 cdrt)
+{
+	struct mtk_xfrm_params *xfrm_params;
+	struct xfrm_state *x = NULL;
+	struct xfrm_offload *xo;
+	struct sec_path *sp;
+
+	if (!cdrt)
+		return;
+
+	spin_lock_bh(&xfrm_params_list.lock);
+	list_for_each_entry(xfrm_params, &xfrm_params_list.list, node) {
+		if (cdrt == xfrm_params->cdrt->idx) {
+			if (xfrm_params->xs->km.state == XFRM_STATE_VALID &&
+			    xfrm_params->xs->xso.type == XFRM_DEV_OFFLOAD_PACKET &&
+			    xfrm_params->xs->xso.dir == XFRM_DEV_OFFLOAD_IN) {
+				x = xfrm_params->xs;
+				xfrm_state_hold(x);
+			}
+			break;
+		}
+	}
+	spin_unlock_bh(&xfrm_params_list.lock);
+
+	if (!x)
+		return;
+
+	/* only attach secpath for resolved states, an empty secpath
+	 * (len == 0) makes xfrm_input_state() read xvec[-1]
+	 */
+	sp = secpath_set(skb);
+	if (!sp || sp->len == XFRM_MAX_DEPTH) {
+		xfrm_state_put(x);
+		return;
+	}
+
+	sp->xvec[sp->len++] = x;
+	sp->olen++;
+	xo = xfrm_offload(skb);
+	xo->flags = CRYPTO_DONE;
+	xo->status = CRYPTO_SUCCESS;
+}
+
 struct xfrm_params_list *mtk_xfrm_params_list_get(void)
 {
 	return &xfrm_params_list;

@@ -330,6 +330,9 @@ static void mtk_crypto_xfrm_offload_deinit(struct mtk_eth *eth)
 #elif defined(CONFIG_CRYPTO_OFFLOAD_INLINE_FLOWBLOCK)
 	mtk_flow_offload_get_cdrt = NULL;
 #endif // HNAT
+	mtk_crypto_set_dec_secpath = NULL;
+	/* wait for in-flight RX NAPI callers before module text goes away */
+	synchronize_net();
 
 	for_each_netdev(&init_net, dev)
 		mtk_crypto_disable_ipsec_dev_features(dev);
@@ -347,6 +350,7 @@ static void mtk_crypto_xfrm_offload_init(struct mtk_eth *eth)
 #elif defined(CONFIG_CRYPTO_OFFLOAD_INLINE_FLOWBLOCK)
 	mtk_flow_offload_get_cdrt = mtk_crypto_xfrm_get_cdrt;
 #endif // HNAT
+	mtk_crypto_set_dec_secpath = mtk_crypto_decrypt_sec_path_setup;
 }
 
 static int __init mtk_crypto_eth_dts_init(struct platform_device *pdev)

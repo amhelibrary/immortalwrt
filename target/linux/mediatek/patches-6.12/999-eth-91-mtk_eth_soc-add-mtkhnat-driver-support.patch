@@ -11,7 +11,7 @@ Subject: [PATCH] net: ethernet: mtk_eth_soc: add mtkhnat driver support
 
 --- a/drivers/net/ethernet/mediatek/Kconfig
 +++ b/drivers/net/ethernet/mediatek/Kconfig
-@@ -32,4 +32,28 @@ config NET_MEDIATEK_STAR_EMAC
+@@ -33,4 +33,28 @@ config NET_MEDIATEK_STAR_EMAC
  	  This driver supports the ethernet MAC IP first used on
  	  MediaTek MT85** SoCs.
  
@@ -49,7 +49,7 @@ Subject: [PATCH] net: ethernet: mtk_eth_soc: add mtkhnat driver support
 +obj-$(CONFIG_NET_MEDIATEK_HNAT) += mtk_hnat/
 --- a/drivers/net/ethernet/mediatek/mtk_eth_soc.c
 +++ b/drivers/net/ethernet/mediatek/mtk_eth_soc.c
-@@ -40,6 +40,10 @@
+@@ -41,6 +41,10 @@
  #include "mtk_eth_reset.h"
  #include "mtk_wed.h"
  
@@ -60,7 +60,7 @@ Subject: [PATCH] net: ethernet: mtk_eth_soc: add mtkhnat driver support
  static int mtk_msg_level = -1;
  module_param_named(msg_level, mtk_msg_level, int, 0);
  MODULE_PARM_DESC(msg_level, "Message level (-1=defaults,0=none,...,16=all)");
-@@ -2871,6 +2875,13 @@ static int mtk_poll_rx(struct napi_struc
+@@ -2888,6 +2892,13 @@ static int mtk_poll_rx(struct napi_struc
  		if (!netdev)
  			netdev = eth->netdev[mac];
  		ppe_idx = eth->mac[mac]->ppe_idx;
@@ -74,10 +74,10 @@ Subject: [PATCH] net: ethernet: mtk_eth_soc: add mtkhnat driver support
  
  		if (unlikely(test_bit(MTK_RESETTING, &eth->state)))
  			goto release_desc;
-@@ -2954,6 +2965,54 @@ static int mtk_poll_rx(struct napi_struc
- 
- 			skb_reserve(skb, NET_SKB_PAD + NET_IP_ALIGN);
- 			skb_put(skb, pktlen);
+@@ -2976,6 +2987,54 @@ static int mtk_poll_rx(struct napi_struc
+ 				cdrt = RX_DMA_GET_CDRT(trxd.rxd7);
+ 				mtk_crypto_set_dec_secpath(skb, cdrt);
+ 			}
 +
 +#if defined(CONFIG_NET_MEDIATEK_HNAT) || defined(CONFIG_NET_MEDIATEK_HNAT_MODULE)
 +			if (mtk_is_netsys_v3_or_greater(eth))
@@ -87,7 +87,7 @@ Subject: [PATCH] net: ethernet: mtk_eth_soc: add mtkhnat driver support
 +
 +			skb_hnat_alg(skb) = 0;
 +			skb_hnat_filled(skb) = 0;
-+			skb_hnat_set_cdrt(skb, RX_DMA_GET_CDRT(trxd.rxd7));
++			skb_hnat_set_cdrt(skb, cdrt);
 +			skb_hnat_magic_tag(skb) = HNAT_MAGIC_TAG;
 +			skb_hnat_set_tops(skb, 0);
 +			skb_hnat_set_is_decap(skb, 0);
@@ -129,7 +129,7 @@ Subject: [PATCH] net: ethernet: mtk_eth_soc: add mtkhnat driver support
  		}
  
  		skb->dev = netdev;
-@@ -2996,8 +3055,10 @@ static int mtk_poll_rx(struct napi_struc
+@@ -3018,8 +3077,10 @@ static int mtk_poll_rx(struct napi_struc
  				skb_dst_set_noref(skb, &eth->dsa_meta[port]->dst);
  		}
  
@@ -140,7 +140,7 @@ Subject: [PATCH] net: ethernet: mtk_eth_soc: add mtkhnat driver support
  
  		if (eth->hwlro && eth->debugfs->hwlro_stats.ebl &&
  		    IS_HW_LRO_RING(ring->ring_no)) {
-@@ -4763,8 +4824,10 @@ static int mtk_open(struct net_device *d
+@@ -4835,8 +4896,10 @@ static int mtk_open(struct net_device *d
  		if (err)
  			return err;
  
@@ -151,7 +151,7 @@ Subject: [PATCH] net: ethernet: mtk_eth_soc: add mtkhnat driver support
  
  		for (i = 0; i < MTK_MAX_DEVS; i++) {
  			if (!eth->netdev[i])
-@@ -4938,8 +5001,10 @@ static int mtk_stop(struct net_device *d
+@@ -5010,8 +5073,10 @@ static int mtk_stop(struct net_device *d
  
  	mtk_dma_free(eth);
  
@@ -162,7 +162,7 @@ Subject: [PATCH] net: ethernet: mtk_eth_soc: add mtkhnat driver support
  
  	return 0;
  }
-@@ -7581,6 +7646,7 @@ static int mtk_probe(struct platform_dev
+@@ -7701,6 +7766,7 @@ static int mtk_probe(struct platform_dev
  		};
  	}
  
@@ -170,7 +170,7 @@ Subject: [PATCH] net: ethernet: mtk_eth_soc: add mtkhnat driver support
  	if (eth->soc->offload_version) {
  		u8 ppe_num = eth->soc->ppe_num;
  
-@@ -7605,6 +7671,7 @@ static int mtk_probe(struct platform_dev
+@@ -7725,6 +7791,7 @@ static int mtk_probe(struct platform_dev
  		if (err)
  			goto err_deinit_ppe;
  	}
@@ -178,7 +178,7 @@ Subject: [PATCH] net: ethernet: mtk_eth_soc: add mtkhnat driver support
  
  	mtk_eth_debugfs_init(eth);
  
-@@ -7671,7 +7738,9 @@ err_unreg_netdev:
+@@ -7792,7 +7859,9 @@ err_unreg_netdev:
  	free_netdev(eth->dummy_dev);
  err_deinit_ppe:
  	mtk_napi_del(eth);
