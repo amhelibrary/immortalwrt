@@ -21,15 +21,17 @@ struct flow_tuple {
 };
 
 enum ft_msg_types {
-	FT_MSG_DEL,
+	FT_MSG_DEL,	//by 5-tuple
 	FT_MSG_ADD,	//not support now
 	FT_MSG_FLUSH,
+	FT_MSG_DEL_MAC,
 	FT_MSG_MAX
 };
 
 enum ftattr_type {
 	FTA_UNSPEC,
 	FTA_TUPLE,
+	FTA_MAC,
 	__FTA_MAX
 };
 #define FTA_MAX (__FTA_MAX - 1)
@@ -66,3 +68,4 @@ struct ftnl_handle *ftnl_open(void);
 void ftnl_close(struct ftnl_handle *h);
 int ftnl_flush_table(struct ftnl_handle *h);
 int ftnl_del_flow(struct ftnl_handle *h, struct flow_tuple *tuple);
+int ftnl_del_mac(struct ftnl_handle *h, const unsigned char *mac);

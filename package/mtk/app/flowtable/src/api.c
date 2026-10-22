@@ -122,3 +122,23 @@ int ftnl_del_flow(struct ftnl_handle *h, struct flow_tuple *tuple)
 
 	return ret;
 }
+
+int ftnl_del_mac(struct ftnl_handle *h, const unsigned char *mac)
+{
+	const int size = 64;
+	union {
+		char buffer[size];
+		struct nlmsghdr nlh;
+	} u;
+	int ret;
+
+	/* construct msg */
+	nfnl_fill_hdr(h->ftnlssh, &u.nlh, 0, AF_UNSPEC, 0,
+		      FT_MSG_DEL_MAC, NLM_F_REQUEST|NLM_F_ACK);
+	nfnl_addattr_l(&u.nlh, size, FTA_MAC, mac, 6);
+
+	/* send msg */
+	ret = nfnl_send(h->nfnlh, &u.nlh);
+
+	return ret;
+}
