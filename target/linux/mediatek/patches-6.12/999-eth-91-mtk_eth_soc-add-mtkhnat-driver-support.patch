@@ -6,8 +6,8 @@ Subject: [PATCH] net: ethernet: mtk_eth_soc: add mtkhnat driver support
 ---
  drivers/net/ethernet/mediatek/Kconfig       | 24 +++++++++++++
  drivers/net/ethernet/mediatek/Makefile      |  1 +
- drivers/net/ethernet/mediatek/mtk_eth_soc.c | 61 +++++++++++++++++++++++++++++++
- 3 files changed, 86 insertions(+)
+ drivers/net/ethernet/mediatek/mtk_eth_soc.c | 68 +++++++++++++++++++++++++++++++
+ 3 files changed, 93 insertions(+)
 
 --- a/drivers/net/ethernet/mediatek/Kconfig
 +++ b/drivers/net/ethernet/mediatek/Kconfig
@@ -60,7 +60,21 @@ Subject: [PATCH] net: ethernet: mtk_eth_soc: add mtkhnat driver support
  static int mtk_msg_level = -1;
  module_param_named(msg_level, mtk_msg_level, int, 0);
  MODULE_PARM_DESC(msg_level, "Message level (-1=defaults,0=none,...,16=all)");
-@@ -2954,6 +2958,53 @@ static int mtk_poll_rx(struct napi_struc
+@@ -2871,6 +2875,13 @@ static int mtk_poll_rx(struct napi_struc
+ 		if (!netdev)
+ 			netdev = eth->netdev[mac];
+ 		ppe_idx = eth->mac[mac]->ppe_idx;
++		/* NPU tunnel decap: CLS steers the packet to NPU, and NPU
++		 * forwards it to the PPE that matches the ingress GMAC
++		 * (source PSE port): GMAC1/2/3 -> PPE0/1/2.
++		 */
++		if (tops_crsn && eth->soc->caps == MT7988_CAPS &&
++		    mac < eth->soc->ppe_num)
++			ppe_idx = mac;
+ 
+ 		if (unlikely(test_bit(MTK_RESETTING, &eth->state)))
+ 			goto release_desc;
+@@ -2954,6 +2965,54 @@ static int mtk_poll_rx(struct napi_struc
  
  			skb_reserve(skb, NET_SKB_PAD + NET_IP_ALIGN);
  			skb_put(skb, pktlen);
@@ -79,6 +93,7 @@ Subject: [PATCH] net: ethernet: mtk_eth_soc: add mtkhnat driver support
 +			skb_hnat_set_is_decap(skb, 0);
 +			skb_hnat_set_is_decrypt(skb, (skb_hnat_cdrt(skb) ? 1 : 0));
 +			skb_hnat_set_is_pppoe(skb, 0);
++			skb_hnat_set_ppe_id(skb, ppe_idx);
 +
 +			if (skb_hnat_reason(skb) == HIT_BIND_FORCE_TO_CPU) {
 +				trace_printk("[%s] reason=0x%x(force to CPU) from WAN to Ext\n",
@@ -114,7 +129,7 @@ Subject: [PATCH] net: ethernet: mtk_eth_soc: add mtkhnat driver support
  		}
  
  		skb->dev = netdev;
-@@ -2996,8 +3047,10 @@ static int mtk_poll_rx(struct napi_struc
+@@ -2996,8 +3055,10 @@ static int mtk_poll_rx(struct napi_struc
  				skb_dst_set_noref(skb, &eth->dsa_meta[port]->dst);
  		}
  
@@ -125,7 +140,7 @@ Subject: [PATCH] net: ethernet: mtk_eth_soc: add mtkhnat driver support
  
  		if (eth->hwlro && eth->debugfs->hwlro_stats.ebl &&
  		    IS_HW_LRO_RING(ring->ring_no)) {
-@@ -4763,8 +4816,10 @@ static int mtk_open(struct net_device *d
+@@ -4763,8 +4824,10 @@ static int mtk_open(struct net_device *d
  		if (err)
  			return err;
  
@@ -136,7 +151,7 @@ Subject: [PATCH] net: ethernet: mtk_eth_soc: add mtkhnat driver support
  
  		for (i = 0; i < MTK_MAX_DEVS; i++) {
  			if (!eth->netdev[i])
-@@ -4938,8 +4993,10 @@ static int mtk_stop(struct net_device *d
+@@ -4938,8 +5001,10 @@ static int mtk_stop(struct net_device *d
  
  	mtk_dma_free(eth);
  
@@ -147,7 +162,7 @@ Subject: [PATCH] net: ethernet: mtk_eth_soc: add mtkhnat driver support
  
  	return 0;
  }
-@@ -7581,6 +7638,7 @@ static int mtk_probe(struct platform_dev
+@@ -7581,6 +7646,7 @@ static int mtk_probe(struct platform_dev
  		};
  	}
  
@@ -155,7 +170,7 @@ Subject: [PATCH] net: ethernet: mtk_eth_soc: add mtkhnat driver support
  	if (eth->soc->offload_version) {
  		u8 ppe_num = eth->soc->ppe_num;
  
-@@ -7605,6 +7663,7 @@ static int mtk_probe(struct platform_dev
+@@ -7605,6 +7671,7 @@ static int mtk_probe(struct platform_dev
  		if (err)
  			goto err_deinit_ppe;
  	}
@@ -163,7 +178,7 @@ Subject: [PATCH] net: ethernet: mtk_eth_soc: add mtkhnat driver support
  
  	mtk_eth_debugfs_init(eth);
  
-@@ -7671,7 +7730,9 @@ err_unreg_netdev:
+@@ -7671,7 +7738,9 @@ err_unreg_netdev:
  	free_netdev(eth->dummy_dev);
  err_deinit_ppe:
  	mtk_napi_del(eth);
