@@ -1,0 +1,36 @@
+From: ImmortalWrt Builder <builder@localhost>
+Date: Wed, 11 Nov 2026 11:20:00 +0800
+Subject: [PATCH] netfilter: keep iptables/ip6tables core with the iptables option
+
+Linux 6.12.113 moved the legacy sockopt interface and eval loop behind the
+new hidden symbols IP_NF_IPTABLES_LEGACY and IP6_NF_IPTABLES_LEGACY, and both
+net/ipv4/netfilter/Makefile and net/ipv6/netfilter/Makefile now key the
+ip_tables.o / ip6_tables.o objects off those symbols instead of
+IP_NF_IPTABLES / IP6_NF_IPTABLES.
+
+The new symbols are only selected by the individual match/target options, so
+a configuration that enables the iptables core alone (OpenWrt ships
+kmod-nf-ipt and kmod-nf-ipt6 as standalone packages) no longer builds
+ip_tables.o and ip6_tables.o. The kmod packages then fail to install with
+"ERROR: module ... is missing".
+
+Give both symbols the same default as their parent option so enabling the
+iptables core again implies the legacy interface, restoring the 6.12.112
+behaviour while keeping the option to turn it off explicitly.
+
+--- a/net/ipv4/netfilter/Kconfig
++++ b/net/ipv4/netfilter/Kconfig
+@@ -14,4 +14,5 @@
+ config IP_NF_IPTABLES_LEGACY
+ 	tristate
++	default IP_NF_IPTABLES
+ 
+ config NF_SOCKET_IPV4
+--- a/net/ipv6/netfilter/Kconfig
++++ b/net/ipv6/netfilter/Kconfig
+@@ -10,4 +10,5 @@
+ config IP6_NF_IPTABLES_LEGACY
+ 	tristate
++	default IP6_NF_IPTABLES
+ 
+ config NF_SOCKET_IPV6
