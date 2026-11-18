@@ -9,7 +9,7 @@ include $(TOPDIR)/rules.mk
 include $(INCLUDE_DIR)/kernel.mk
 
 PKG_NAME:=memdump-cfg
-PKG_RELEASE:=1
+PKG_RELEASE:=3
 PKG_LICENSE:=BSD-3-Clause
 
 include $(INCLUDE_DIR)/package.mk
@@ -17,6 +17,7 @@ include $(INCLUDE_DIR)/package.mk
 define KernelPackage/memdump-cfg
   SUBMENU:=Other modules
   TITLE:=Configuration helper for memdump
+  DEFAULT:=y if TARGET_mediatek
   FILES:=$(PKG_BUILD_DIR)/memdump-cfg.ko
   AUTOLOAD:=$(call AutoLoad,10,memdump-cfg,1)
   KCONFIG:=
